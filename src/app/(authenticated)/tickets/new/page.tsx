@@ -31,7 +31,7 @@ export default function NewTicketPage() {
   const [managerId, setManagerId] = useState("");
 
   useEffect(() => {
-    fetch("/api/users")
+    fetch("/api/users?minimal=true")
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => setUsers(Array.isArray(data) ? data : []))
       .catch(() => {});

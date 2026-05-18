@@ -20,9 +20,26 @@ const createUserSchema = z.object({
   ]),
 });
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session || !canManageUsers(session.user.role)) {
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(req.url);
+  const minimal = searchParams.get("minimal") === "true";
+
+  // Any authenticated user can fetch a minimal user list (for reassign dropdowns)
+  if (minimal) {
+    const users = await prisma.user.findMany({
+      select: { id: true, name: true, role: true },
+      orderBy: { name: "asc" },
+    });
+    return NextResponse.json(users);
+  }
+
+  // Full user list is admin-only
+  if (!canManageUsers(session.user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

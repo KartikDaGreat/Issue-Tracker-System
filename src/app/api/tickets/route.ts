@@ -79,44 +79,46 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const ticket = await prisma.ticket.create({
-    data: {
-      title: parsed.data.title,
-      description: parsed.data.description,
-      category: parsed.data.category,
-      severity: parsed.data.severity || "MEDIUM",
-      creatorId: session.user.id,
-      managerId: parsed.data.managerId || null,
-      dateOfOccurrence: parsed.data.dateOfOccurrence
-        ? new Date(parsed.data.dateOfOccurrence)
-        : null,
-    },
-    include: {
-      creator: { select: { id: true, name: true } },
-      manager: { select: { id: true, name: true } },
-    },
-  });
-
-  // Create CREATED event
-  await prisma.ticketEvent.create({
-    data: {
-      type: "CREATED",
-      newValue: `Ticket #${ticket.ticketNumber} created`,
-      ticketId: ticket.id,
-      userId: session.user.id,
-    },
-  });
-
-  // Notify manager if assigned
-  if (ticket.managerId && ticket.managerId !== session.user.id) {
-    await prisma.notification.create({
+  const ticket = await prisma.$transaction(async (tx) => {
+    const created = await tx.ticket.create({
       data: {
-        message: `You have been assigned ticket #${ticket.ticketNumber}: ${ticket.title}`,
-        link: `/tickets/${ticket.id}`,
-        userId: ticket.managerId,
+        title: parsed.data.title,
+        description: parsed.data.description,
+        category: parsed.data.category,
+        severity: parsed.data.severity || "MEDIUM",
+        creatorId: session.user.id,
+        managerId: parsed.data.managerId || null,
+        dateOfOccurrence: parsed.data.dateOfOccurrence
+          ? new Date(parsed.data.dateOfOccurrence)
+          : null,
+      },
+      include: {
+        creator: { select: { id: true, name: true } },
+        manager: { select: { id: true, name: true } },
       },
     });
-  }
+
+    await tx.ticketEvent.create({
+      data: {
+        type: "CREATED",
+        newValue: `Ticket #${created.ticketNumber} created`,
+        ticketId: created.id,
+        userId: session.user.id,
+      },
+    });
+
+    if (created.managerId && created.managerId !== session.user.id) {
+      await tx.notification.create({
+        data: {
+          message: `You have been assigned ticket #${created.ticketNumber}: ${created.title}`,
+          link: `/tickets/${created.id}`,
+          userId: created.managerId,
+        },
+      });
+    }
+
+    return created;
+  });
 
   return NextResponse.json(ticket, { status: 201 });
 }

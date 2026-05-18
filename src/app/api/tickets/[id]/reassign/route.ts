@@ -50,36 +50,38 @@ export async function PATCH(
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  const updated = await prisma.ticket.update({
-    where: { id },
-    data: { managerId: parsed.data.managerId },
-    include: {
-      creator: { select: { id: true, name: true } },
-      manager: { select: { id: true, name: true } },
-    },
-  });
-
-  // Create REASSIGNED event
-  await prisma.ticketEvent.create({
-    data: {
-      type: "REASSIGNED",
-      oldValue: ticket.manager?.name || "Unassigned",
-      newValue: newManager.name,
-      ticketId: id,
-      userId: session.user.id,
-    },
-  });
-
-  // Notify new manager
-  if (newManager.id !== session.user.id) {
-    await prisma.notification.create({
-      data: {
-        message: `You have been assigned ticket #${ticket.ticketNumber}: ${ticket.title}`,
-        link: `/tickets/${ticket.id}`,
-        userId: newManager.id,
+  const updated = await prisma.$transaction(async (tx) => {
+    const result = await tx.ticket.update({
+      where: { id },
+      data: { managerId: parsed.data.managerId },
+      include: {
+        creator: { select: { id: true, name: true } },
+        manager: { select: { id: true, name: true } },
       },
     });
-  }
+
+    await tx.ticketEvent.create({
+      data: {
+        type: "REASSIGNED",
+        oldValue: ticket.manager?.name || "Unassigned",
+        newValue: newManager.name,
+        ticketId: id,
+        userId: session.user.id,
+      },
+    });
+
+    if (newManager.id !== session.user.id) {
+      await tx.notification.create({
+        data: {
+          message: `You have been assigned ticket #${ticket.ticketNumber}: ${ticket.title}`,
+          link: `/tickets/${ticket.id}`,
+          userId: newManager.id,
+        },
+      });
+    }
+
+    return result;
+  });
 
   return NextResponse.json(updated);
 }

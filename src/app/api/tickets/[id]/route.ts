@@ -75,7 +75,7 @@ export async function PATCH(
     );
   }
 
-  const events = [];
+  const events: { type: "STATUS_CHANGE"; oldValue: string; newValue: string; ticketId: string; userId: string }[] = [];
 
   if (parsed.data.status && parsed.data.status !== ticket.status) {
     events.push({
@@ -90,42 +90,45 @@ export async function PATCH(
   if (parsed.data.severity && parsed.data.severity !== ticket.severity) {
     events.push({
       type: "STATUS_CHANGE" as const,
-      oldValue: `Severity: ${ticket.severity}`,
-      newValue: `Severity: ${parsed.data.severity}`,
+      oldValue: ticket.severity,
+      newValue: parsed.data.severity,
       ticketId: id,
       userId: session.user.id,
     });
   }
 
-  const updated = await prisma.ticket.update({
-    where: { id },
-    data: parsed.data,
-    include: {
-      creator: { select: { id: true, name: true } },
-      manager: { select: { id: true, name: true } },
-    },
-  });
+  const updated = await prisma.$transaction(async (tx) => {
+    const result = await tx.ticket.update({
+      where: { id },
+      data: parsed.data,
+      include: {
+        creator: { select: { id: true, name: true } },
+        manager: { select: { id: true, name: true } },
+      },
+    });
 
-  if (events.length > 0) {
-    await prisma.ticketEvent.createMany({ data: events });
-  }
-
-  // Notify relevant parties about status change
-  if (parsed.data.status) {
-    const notifyUserIds = [ticket.creatorId, ticket.managerId].filter(
-      (uid): uid is string => !!uid && uid !== session.user.id
-    );
-
-    if (notifyUserIds.length > 0) {
-      await prisma.notification.createMany({
-        data: notifyUserIds.map((userId) => ({
-          message: `Ticket #${ticket.ticketNumber} status changed to ${parsed.data.status}`,
-          link: `/tickets/${ticket.id}`,
-          userId,
-        })),
-      });
+    if (events.length > 0) {
+      await tx.ticketEvent.createMany({ data: events });
     }
-  }
+
+    if (parsed.data.status) {
+      const notifyUserIds = [ticket.creatorId, ticket.managerId].filter(
+        (uid): uid is string => !!uid && uid !== session.user.id
+      );
+
+      if (notifyUserIds.length > 0) {
+        await tx.notification.createMany({
+          data: notifyUserIds.map((userId) => ({
+            message: `Ticket #${ticket.ticketNumber} status changed to ${parsed.data.status}`,
+            link: `/tickets/${ticket.id}`,
+            userId,
+          })),
+        });
+      }
+    }
+
+    return result;
+  });
 
   return NextResponse.json(updated);
 }

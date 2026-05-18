@@ -65,39 +65,41 @@ export async function POST(
     );
   }
 
-  const comment = await prisma.comment.create({
-    data: {
-      body: parsed.data.body,
-      ticketId: id,
-      authorId: session.user.id,
-    },
-    include: { author: { select: { id: true, name: true } } },
-  });
-
-  // Create COMMENT event
-  await prisma.ticketEvent.create({
-    data: {
-      type: "COMMENT",
-      newValue: parsed.data.body.slice(0, 100),
-      ticketId: id,
-      userId: session.user.id,
-    },
-  });
-
-  // Notify ticket creator and manager
-  const notifyUserIds = [ticket.creatorId, ticket.managerId].filter(
-    (uid): uid is string => !!uid && uid !== session.user.id
-  );
-
-  if (notifyUserIds.length > 0) {
-    await prisma.notification.createMany({
-      data: notifyUserIds.map((userId) => ({
-        message: `New comment on ticket #${ticket.ticketNumber} by ${session.user.name}`,
-        link: `/tickets/${ticket.id}`,
-        userId,
-      })),
+  const comment = await prisma.$transaction(async (tx) => {
+    const created = await tx.comment.create({
+      data: {
+        body: parsed.data.body,
+        ticketId: id,
+        authorId: session.user.id,
+      },
+      include: { author: { select: { id: true, name: true } } },
     });
-  }
+
+    await tx.ticketEvent.create({
+      data: {
+        type: "COMMENT",
+        newValue: parsed.data.body.slice(0, 100),
+        ticketId: id,
+        userId: session.user.id,
+      },
+    });
+
+    const notifyUserIds = [ticket.creatorId, ticket.managerId].filter(
+      (uid): uid is string => !!uid && uid !== session.user.id
+    );
+
+    if (notifyUserIds.length > 0) {
+      await tx.notification.createMany({
+        data: notifyUserIds.map((userId) => ({
+          message: `New comment on ticket #${ticket.ticketNumber} by ${session.user.name}`,
+          link: `/tickets/${ticket.id}`,
+          userId,
+        })),
+      });
+    }
+
+    return created;
+  });
 
   return NextResponse.json(comment, { status: 201 });
 }

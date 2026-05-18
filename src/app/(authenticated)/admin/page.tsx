@@ -55,6 +55,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editRole, setEditRole] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (session && session.user.role !== "ADMIN") {
@@ -72,6 +73,7 @@ export default function AdminPage() {
 
   async function handleDelete(id: string, name: string) {
     if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
+    setSaving(true);
     const res = await fetch(`/api/users/${id}`, { method: "DELETE" });
     if (res.ok) {
       toast.success("User deleted");
@@ -80,10 +82,12 @@ export default function AdminPage() {
       const err = await res.json();
       toast.error(err.error || "Failed to delete user");
     }
+    setSaving(false);
   }
 
   async function handleUpdateRole() {
-    if (!editingUser || !editRole) return;
+    if (!editingUser || !editRole || saving) return;
+    setSaving(true);
     const res = await fetch(`/api/users/${editingUser.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -96,6 +100,7 @@ export default function AdminPage() {
     } else {
       toast.error("Failed to update role");
     }
+    setSaving(false);
   }
 
   if (loading) {
@@ -192,8 +197,13 @@ export default function AdminPage() {
                                 <SelectItem value="STAFF">Staff</SelectItem>
                               </SelectContent>
                             </Select>
-                            <Button onClick={handleUpdateRole} className="w-full">
-                              Save Changes
+                            <Button onClick={handleUpdateRole} className="w-full" disabled={saving}>
+                              {saving ? (
+                                <span className="flex items-center gap-2">
+                                  <svg className="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                                  Saving...
+                                </span>
+                              ) : "Save Changes"}
                             </Button>
                           </div>
                         </DialogContent>
@@ -204,6 +214,7 @@ export default function AdminPage() {
                           size="sm"
                           className="text-red-600 hover:bg-red-50 hover:text-red-700"
                           onClick={() => handleDelete(user.id, user.name)}
+                          disabled={saving}
                         >
                           Delete
                         </Button>

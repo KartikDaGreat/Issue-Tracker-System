@@ -65,6 +65,7 @@ export default function TicketDetailPage({
   const router = useRouter();
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [users, setUsers] = useState<UserOption[]>([]);
 
@@ -89,6 +90,8 @@ export default function TicketDetailPage({
   }, [id]);
 
   async function updateStatus(status: string) {
+    if (saving) return;
+    setSaving(true);
     const res = await fetch(`/api/tickets/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -96,13 +99,16 @@ export default function TicketDetailPage({
     });
     if (res.ok) {
       toast.success("Status updated");
-      fetchTicket();
+      await fetchTicket();
     } else {
       toast.error("Failed to update status");
     }
+    setSaving(false);
   }
 
   async function updateSeverity(severity: string) {
+    if (saving) return;
+    setSaving(true);
     const res = await fetch(`/api/tickets/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -110,13 +116,16 @@ export default function TicketDetailPage({
     });
     if (res.ok) {
       toast.success("Severity updated");
-      fetchTicket();
+      await fetchTicket();
     } else {
       toast.error("Failed to update severity");
     }
+    setSaving(false);
   }
 
   async function reassign(managerId: string) {
+    if (saving) return;
+    setSaving(true);
     const res = await fetch(`/api/tickets/${id}/reassign`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -124,10 +133,11 @@ export default function TicketDetailPage({
     });
     if (res.ok) {
       toast.success("Ticket reassigned");
-      fetchTicket();
+      await fetchTicket();
     } else {
       toast.error("Failed to reassign ticket");
     }
+    setSaving(false);
   }
 
   if (loading) {
@@ -258,7 +268,12 @@ export default function TicketDetailPage({
             </CardContent>
           </Card>
 
-          <Card className="border-0 shadow-sm ring-1 ring-black/5">
+          <Card className="relative border-0 shadow-sm ring-1 ring-black/5">
+            {saving && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/60 backdrop-blur-[1px]">
+                <svg className="h-5 w-5 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              </div>
+            )}
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Actions</CardTitle>
             </CardHeader>

@@ -87,6 +87,23 @@ export async function DELETE(
     );
   }
 
-  await prisma.user.delete({ where: { id } });
+  const ticketCount = await prisma.ticket.count({
+    where: { OR: [{ creatorId: id }, { managerId: id }] },
+  });
+
+  if (ticketCount > 0) {
+    return NextResponse.json(
+      { error: `Cannot delete user with ${ticketCount} associated ticket(s). Reassign or close their tickets first.` },
+      { status: 400 }
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.notification.deleteMany({ where: { userId: id } });
+    await tx.comment.deleteMany({ where: { authorId: id } });
+    await tx.ticketEvent.deleteMany({ where: { userId: id } });
+    await tx.user.delete({ where: { id } });
+  });
+
   return NextResponse.json({ success: true });
 }

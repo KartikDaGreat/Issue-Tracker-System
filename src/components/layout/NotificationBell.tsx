@@ -20,6 +20,7 @@ interface Notification {
 export default function NotificationBell() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [acting, setActing] = useState(false);
   const router = useRouter();
 
   const fetchNotifications = useCallback(async () => {
@@ -42,16 +43,22 @@ export default function NotificationBell() {
   }, [fetchNotifications]);
 
   async function markAllRead() {
+    if (acting) return;
+    setActing(true);
     await fetch("/api/notifications", { method: "PATCH" });
-    fetchNotifications();
+    await fetchNotifications();
+    setActing(false);
   }
 
   async function handleClick(n: Notification) {
+    if (acting) return;
+    setActing(true);
     if (!n.read) {
       await fetch(`/api/notifications/${n.id}`, { method: "PATCH" });
     }
     if (n.link) router.push(n.link);
-    fetchNotifications();
+    await fetchNotifications();
+    setActing(false);
   }
 
   return (
@@ -83,9 +90,10 @@ export default function NotificationBell() {
           {unreadCount > 0 && (
             <button
               onClick={markAllRead}
-              className="text-xs font-medium text-primary hover:underline"
+              disabled={acting}
+              className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
             >
-              Mark all read
+              {acting ? "Updating..." : "Mark all read"}
             </button>
           )}
         </div>

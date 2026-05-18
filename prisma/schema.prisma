@@ -1,0 +1,137 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  ADMIN
+  PRINCIPAL
+  ACADEMIC_HEAD
+  FACILITIES_MANAGER
+  OFFICE_MANAGER
+  STAFF
+}
+
+enum Category {
+  ACADEMICS
+  PARENT_ISSUES
+  STUDENT_ISSUES
+  FACILITIES_ISSUES
+  STAFF_ISSUES
+  SECURITY
+  TRANSPORT
+  MISCELLANEOUS
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum Status {
+  OPEN
+  IN_PROGRESS
+  PENDING
+  CLOSED
+}
+
+enum EventType {
+  CREATED
+  STATUS_CHANGE
+  REASSIGNED
+  COMMENT
+}
+
+model User {
+  id             String         @id @default(cuid())
+  name           String
+  email          String         @unique
+  hashedPassword String
+  role           Role           @default(STAFF)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  createdTickets Ticket[]       @relation("CreatedTickets")
+  managedTickets Ticket[]       @relation("ManagedTickets")
+  comments       Comment[]
+  notifications  Notification[]
+  ticketEvents   TicketEvent[]
+}
+
+model Ticket {
+  id               String        @id @default(cuid())
+  ticketNumber     Int           @default(autoincrement())
+  category         Category
+  severity         Severity      @default(MEDIUM)
+  status           Status        @default(OPEN)
+  title            String
+  description      String
+  dateOfOccurrence DateTime?
+
+  creatorId        String
+  creator          User          @relation("CreatedTickets", fields: [creatorId], references: [id])
+
+  managerId        String?
+  manager          User?         @relation("ManagedTickets", fields: [managerId], references: [id])
+
+  comments         Comment[]
+  events           TicketEvent[]
+
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([creatorId])
+  @@index([managerId])
+  @@index([status])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  body      String
+  createdAt DateTime @default(now())
+
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+
+  @@index([ticketId])
+}
+
+model TicketEvent {
+  id        String    @id @default(cuid())
+  type      EventType
+  oldValue  String?
+  newValue  String?
+  createdAt DateTime  @default(now())
+
+  ticketId  String
+  ticket    Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@index([ticketId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  message   String
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}

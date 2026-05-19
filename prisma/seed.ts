@@ -9,9 +9,9 @@ async function main() {
 
   await prisma.user.upsert({
     where: { email: "admin@school.com" },
-    update: { hashedPassword },
+    update: { hashedPassword, name: "School Administrator" },
     create: {
-      name: "System Admin",
+      name: "School Administrator",
       email: "admin@school.com",
       hashedPassword,
       role: "ADMIN",

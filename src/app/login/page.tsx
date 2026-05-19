@@ -35,7 +35,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50">
+    <div className="flex min-h-screen items-center justify-center bg-white">
       <div className="w-full max-w-md px-4">
         <div className="mb-8 text-center">
           <img

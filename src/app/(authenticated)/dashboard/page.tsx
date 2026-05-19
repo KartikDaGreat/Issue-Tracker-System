@@ -79,6 +79,10 @@ export default function DashboardPage() {
   const inProgressCount = tickets.filter((t) => t.status === "IN_PROGRESS").length;
   const criticalCount = tickets.filter((t) => t.severity === "CRITICAL").length;
 
+  const userId = session?.user?.id;
+  const myTickets = tickets.filter((t) => t.manager?.id === userId);
+  const otherTickets = tickets.filter((t) => t.manager?.id !== userId);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -212,59 +216,72 @@ export default function DashboardPage() {
           </Select>
         </div>
 
-        <div className="p-0">
-          {loading ? (
-            <div className="flex items-center justify-center py-16">
-              <div className="flex flex-col items-center gap-3">
-                <svg className="h-6 w-6 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                <span className="text-sm text-muted-foreground">Loading tickets...</span>
-              </div>
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="flex flex-col items-center gap-3">
+              <svg className="h-6 w-6 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              <span className="text-sm text-muted-foreground">Loading tickets...</span>
             </div>
-          ) : tickets.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 text-gray-400">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
-              </div>
-              <p className="mt-4 text-sm font-medium text-gray-900">No tickets found</p>
-              <p className="mt-1 text-sm text-muted-foreground">Get started by creating your first ticket.</p>
-              <Link href="/tickets/new">
-                <Button variant="outline" className="mt-4 gap-2" size="sm">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-                  Create Ticket
-                </Button>
-              </Link>
+          </div>
+        ) : tickets.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 text-gray-400">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
             </div>
-          ) : (
-            <>
-              <TicketTable tickets={tickets} />
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between border-t px-4 py-3">
-                  <p className="text-sm text-muted-foreground">
-                    Showing {(page - 1) * 20 + 1}–{Math.min(page * 20, total)} of {total}
-                  </p>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={page <= 1}
-                      onClick={() => setFilter("page", String(page - 1))}
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={page >= totalPages}
-                      onClick={() => setFilter("page", String(page + 1))}
-                    >
-                      Next
-                    </Button>
-                  </div>
+            <p className="mt-4 text-sm font-medium text-gray-900">No tickets found</p>
+            <p className="mt-1 text-sm text-muted-foreground">Get started by creating your first ticket.</p>
+            <Link href="/tickets/new">
+              <Button variant="outline" className="mt-4 gap-2" size="sm">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                Create Ticket
+              </Button>
+            </Link>
+          </div>
+        ) : (
+          <>
+            {myTickets.length > 0 && (
+              <div>
+                <div className="px-4 py-3 border-b bg-blue-50/50">
+                  <h2 className="text-sm font-semibold text-gray-900">Assigned to Me ({myTickets.length})</h2>
                 </div>
-              )}
-            </>
-          )}
-        </div>
+                <TicketTable tickets={myTickets} />
+              </div>
+            )}
+            {otherTickets.length > 0 && (
+              <div>
+                <div className="px-4 py-3 border-b bg-gray-50/50">
+                  <h2 className="text-sm font-semibold text-gray-900">Other Tickets ({otherTickets.length})</h2>
+                </div>
+                <TicketTable tickets={otherTickets} />
+              </div>
+            )}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between border-t px-4 py-3">
+                <p className="text-sm text-muted-foreground">
+                  Showing {(page - 1) * 20 + 1}–{Math.min(page * 20, total)} of {total}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page <= 1}
+                    onClick={() => setFilter("page", String(page - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page >= totalPages}
+                    onClick={() => setFilter("page", String(page + 1))}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </Card>
     </div>
   );

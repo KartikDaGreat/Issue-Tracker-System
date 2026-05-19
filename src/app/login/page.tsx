@@ -38,17 +38,14 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50">
       <div className="w-full max-w-md px-4">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
-            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
-              <path d="M14 2v4a2 2 0 0 0 2 2h4" />
-              <path d="M9 15h6" />
-              <path d="M9 11h6" />
-            </svg>
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">Issue Tracker</h1>
+          <img
+            src="/logo.png"
+            alt="KV Matric Higher Secondary School"
+            className="mx-auto mb-4 h-20 w-auto"
+          />
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900">Ticket Tracker</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            School Management Ticketing System
+            KVMHSS Issue Tracking System
           </p>
         </div>
         <Card className="shadow-xl border-0 ring-1 ring-black/5">
@@ -70,7 +67,7 @@ export default function LoginPage() {
                   name="email"
                   type="email"
                   required
-                  placeholder="admin@school.com"
+                  placeholder="name@school.com"
                   className="h-10"
                 />
               </div>

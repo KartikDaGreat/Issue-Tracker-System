@@ -14,8 +14,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Issue Tracker",
-  description: "School Issue Tracking System",
+  title: "KVMHSS Ticket Tracker",
+  description: "KV Matric Higher Secondary School - Issue Tracking System",
+  icons: {
+    icon: "/favicon.png",
+    apple: "/favicon.png",
+  },
 };
 
 export default function RootLayout({

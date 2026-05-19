@@ -236,9 +236,9 @@ export default function AdminPage() {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead className="pl-4">User</TableHead>
-                <TableHead>Role</TableHead>
+                <TableHead className="hidden sm:table-cell">Role</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="hidden sm:table-cell">Joined</TableHead>
+                <TableHead className="hidden lg:table-cell">Joined</TableHead>
                 <TableHead className="text-right pr-4">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -256,10 +256,11 @@ export default function AdminPage() {
                         <div>
                           <p className="font-medium text-gray-900">{user.name}</p>
                           <p className="text-xs text-muted-foreground">{user.email}</p>
+                          <p className="text-xs text-muted-foreground sm:hidden">{user.role.replace(/_/g, " ")}</p>
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden sm:table-cell">
                       <Badge className={`ring-1 font-medium text-xs ${colorClass}`}>
                         {user.role.replace(/_/g, " ")}
                       </Badge>
@@ -271,11 +272,11 @@ export default function AdminPage() {
                         <Badge className="bg-red-50 text-red-700 ring-1 ring-red-600/20 hover:bg-red-50 font-medium text-xs">Inactive</Badge>
                       )}
                     </TableCell>
-                    <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
+                    <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
                       {new Date(user.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                     </TableCell>
                     <TableCell className="text-right pr-4">
-                      <div className="flex justify-end gap-2">
+                      <div className="flex flex-wrap justify-end gap-1.5">
                         <Dialog>
                           <DialogTrigger
                             render={<Button variant="outline" size="sm" />}

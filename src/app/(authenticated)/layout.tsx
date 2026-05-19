@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import Header from "@/components/layout/Header";
 import Sidebar from "@/components/layout/Sidebar";
+import MobileNav from "@/components/layout/MobileNav";
 
 export default async function AuthenticatedLayout({
   children,
@@ -17,12 +18,13 @@ export default async function AuthenticatedLayout({
       <Header />
       <div className="flex flex-1">
         <Sidebar />
-        <main className="flex-1 overflow-auto p-4 md:p-8">
+        <main className="flex-1 overflow-auto p-4 pb-20 md:p-8 md:pb-8">
           <div className="mx-auto max-w-6xl">
             {children}
           </div>
         </main>
       </div>
+      <MobileNav />
     </div>
   );
 }

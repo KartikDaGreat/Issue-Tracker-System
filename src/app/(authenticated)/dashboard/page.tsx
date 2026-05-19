@@ -35,7 +35,7 @@ export default function DashboardPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const status = searchParams.get("status") || "";
+  const status = searchParams.get("status") ?? "OPEN";
   const category = searchParams.get("category") || "";
   const severity = searchParams.get("severity") || "";
   const page = parseInt(searchParams.get("page") || "1");
@@ -44,10 +44,12 @@ export default function DashboardPage() {
     async function fetchTickets() {
       setLoading(true);
       const params = new URLSearchParams();
-      if (status) params.set("status", status);
+      if (status && status !== "all") params.set("status", status);
       if (category) params.set("category", category);
       if (severity) params.set("severity", severity);
       params.set("page", String(page));
+      params.set("sort", "severity");
+      params.set("order", "desc");
 
       const res = await fetch(`/api/tickets?${params}`);
       if (res.ok) {
@@ -67,7 +69,7 @@ export default function DashboardPage() {
     } else {
       params.delete(key);
     }
-    params.set("page", "1");
+    if (key !== "page") params.set("page", "1");
     router.push(`/dashboard?${params}`);
   }
 
@@ -157,7 +159,7 @@ export default function DashboardPage() {
         <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
           <span className="text-sm font-medium text-gray-700">Filters:</span>
           <Select
-            value={status || "all"}
+            value={status}
             onValueChange={(v) => v && setFilter("status", v)}
           >
             <SelectTrigger className="w-40">

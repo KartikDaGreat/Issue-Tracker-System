@@ -39,6 +39,19 @@ export default function NewTicketPage() {
 
   const selectedManager = users.find((u) => u.id === managerId);
 
+  const roleLabels: Record<string, string> = {
+    ADMIN: "Admin",
+    PRINCIPAL: "Principal",
+    ACADEMIC_HEAD: "Academic Head",
+    FACILITIES_MANAGER: "Facilities Manager",
+    OFFICE_MANAGER: "Office Manager",
+    STAFF: "Staff",
+  };
+  const roleOrder = ["ADMIN", "PRINCIPAL", "ACADEMIC_HEAD", "FACILITIES_MANAGER", "OFFICE_MANAGER", "STAFF"];
+  const groupedUsers = roleOrder
+    .map((role) => ({ role, label: roleLabels[role] || role, users: users.filter((u) => u.role === role) }))
+    .filter((g) => g.users.length > 0);
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!category) {
@@ -152,10 +165,17 @@ export default function NewTicketPage() {
                     )}
                   </SelectTrigger>
                   <SelectContent>
-                    {users.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.name} ({u.role.replace(/_/g, " ")})
-                      </SelectItem>
+                    {groupedUsers.map((group) => (
+                      <div key={group.role}>
+                        <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                          {group.label}
+                        </div>
+                        {group.users.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.name}
+                          </SelectItem>
+                        ))}
+                      </div>
                     ))}
                   </SelectContent>
                 </Select>
@@ -174,7 +194,7 @@ export default function NewTicketPage() {
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="deadline" className="text-sm font-medium">Deadline</Label>
+                <Label htmlFor="deadline" className="text-sm font-medium">Deadline (optional)</Label>
                 <Input
                   id="deadline"
                   name="deadline"

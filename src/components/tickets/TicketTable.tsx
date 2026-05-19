@@ -19,6 +19,7 @@ interface Ticket {
   category: string;
   severity: string;
   status: string;
+  deadline: string | null;
   createdAt: string;
   creator: { id: string; name: string };
   manager: { id: string; name: string } | null;
@@ -35,6 +36,7 @@ export default function TicketTable({ tickets }: { tickets: Ticket[] }) {
           <TableHead>Severity</TableHead>
           <TableHead>Status</TableHead>
           <TableHead className="hidden lg:table-cell">Assigned To</TableHead>
+          <TableHead className="hidden md:table-cell">Deadline</TableHead>
           <TableHead className="hidden sm:table-cell pr-4">Created</TableHead>
         </TableRow>
       </TableHeader>
@@ -81,6 +83,15 @@ export default function TicketTable({ tickets }: { tickets: Ticket[] }) {
                 </div>
               ) : (
                 <span className="text-sm text-muted-foreground">Unassigned</span>
+              )}
+            </TableCell>
+            <TableCell className="hidden md:table-cell text-sm">
+              {ticket.deadline ? (
+                <span className={new Date(ticket.deadline) < new Date() ? "text-red-600 font-medium" : "text-muted-foreground"}>
+                  {new Date(ticket.deadline).toLocaleDateString()}
+                </span>
+              ) : (
+                <span className="text-muted-foreground">-</span>
               )}
             </TableCell>
             <TableCell className="hidden sm:table-cell pr-4 text-sm text-muted-foreground">

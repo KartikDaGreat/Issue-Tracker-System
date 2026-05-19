@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canManageUsers } from "@/lib/permissions";
+import bcrypt from "bcryptjs";
 import { z } from "zod";
 
 const updateUserSchema = z.object({
@@ -17,6 +18,8 @@ const updateUserSchema = z.object({
       "STAFF",
     ])
     .optional(),
+  isActive: z.boolean().optional(),
+  password: z.string().min(6).optional(),
 });
 
 export async function GET(
@@ -31,7 +34,7 @@ export async function GET(
   const { id } = await params;
   const user = await prisma.user.findUnique({
     where: { id },
-    select: { id: true, name: true, email: true, role: true, createdAt: true },
+    select: { id: true, name: true, email: true, role: true, isActive: true, createdAt: true },
   });
 
   if (!user) {
@@ -60,10 +63,16 @@ export async function PATCH(
     );
   }
 
+  const updateData: Record<string, unknown> = { ...parsed.data };
+  if (parsed.data.password) {
+    updateData.hashedPassword = await bcrypt.hash(parsed.data.password, 10);
+    delete updateData.password;
+  }
+
   const user = await prisma.user.update({
     where: { id },
-    data: parsed.data,
-    select: { id: true, name: true, email: true, role: true },
+    data: updateData,
+    select: { id: true, name: true, email: true, role: true, isActive: true },
   });
 
   return NextResponse.json(user);

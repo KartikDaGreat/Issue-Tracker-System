@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
   // Any authenticated user can fetch a minimal user list (for reassign dropdowns)
   if (minimal) {
     const users = await prisma.user.findMany({
+      where: { isActive: true },
       select: { id: true, name: true, role: true },
       orderBy: { name: "asc" },
     });
@@ -44,7 +45,7 @@ export async function GET(req: NextRequest) {
   }
 
   const users = await prisma.user.findMany({
-    select: { id: true, name: true, email: true, role: true, createdAt: true },
+    select: { id: true, name: true, email: true, role: true, isActive: true, createdAt: true },
     orderBy: { createdAt: "desc" },
   });
 

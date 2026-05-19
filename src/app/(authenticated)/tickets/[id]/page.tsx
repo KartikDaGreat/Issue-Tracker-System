@@ -29,6 +29,7 @@ interface TicketDetail {
   severity: string;
   status: string;
   dateOfOccurrence: string | null;
+  deadline: string | null;
   createdAt: string;
   updatedAt: string;
   creator: { id: string; name: string; email: string; role: string };
@@ -167,10 +168,14 @@ export default function TicketDetailPage({
 
   if (!ticket) return null;
 
+  const isAdmin = session?.user.role === "ADMIN";
+  const isAcknowledged = ticket.status === "ACKNOWLEDGED";
+
   const canReassign =
+    !isAcknowledged && (
     session?.user.role === "ADMIN" ||
     session?.user.role === "PRINCIPAL" ||
-    session?.user.id === ticket.manager?.id;
+    session?.user.id === ticket.manager?.id);
 
   const selectedReassignUser = users.find((u) => u.id === ticket.manager?.id);
 
@@ -193,6 +198,13 @@ export default function TicketDetailPage({
         </p>
       </div>
 
+      {isAcknowledged && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+          This ticket has been acknowledged and is locked from further changes.
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
           <Card className="border-0 shadow-sm ring-1 ring-black/5">
@@ -210,6 +222,7 @@ export default function TicketDetailPage({
             ticketId={ticket.id}
             comments={ticket.comments}
             onCommentAdded={fetchTicket}
+            readonly={isAcknowledged && !isAdmin}
           />
 
           <TicketTimeline events={ticket.events} />
@@ -265,9 +278,21 @@ export default function TicketDetailPage({
                   </div>
                 </>
               )}
+              {ticket.deadline && (
+                <>
+                  <Separator />
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Deadline</span>
+                    <span className={new Date(ticket.deadline) < new Date() ? "text-red-600 font-medium" : ""}>
+                      {new Date(ticket.deadline).toLocaleDateString()}
+                    </span>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 
+          {!(isAcknowledged && !isAdmin) && (
           <Card className="relative border-0 shadow-sm ring-1 ring-black/5">
             {saving && (
               <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/60 backdrop-blur-[1px]">
@@ -289,6 +314,7 @@ export default function TicketDetailPage({
                     <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
                     <SelectItem value="PENDING">Pending</SelectItem>
                     <SelectItem value="CLOSED">Closed</SelectItem>
+                    {isAdmin && <SelectItem value="ACKNOWLEDGED">Acknowledged</SelectItem>}
                   </SelectContent>
                 </Select>
               </div>
@@ -307,6 +333,33 @@ export default function TicketDetailPage({
                   </SelectContent>
                 </Select>
               </div>
+
+              {isAdmin && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-gray-500">Deadline</label>
+                  <input
+                    type="date"
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                    value={ticket.deadline ? new Date(ticket.deadline).toISOString().split("T")[0] : ""}
+                    onChange={async (e) => {
+                      if (saving) return;
+                      setSaving(true);
+                      const res = await fetch(`/api/tickets/${id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ deadline: e.target.value || null }),
+                      });
+                      if (res.ok) {
+                        toast.success("Deadline updated");
+                        await fetchTicket();
+                      } else {
+                        toast.error("Failed to update deadline");
+                      }
+                      setSaving(false);
+                    }}
+                  />
+                </div>
+              )}
 
               {canReassign && (
                 <div className="space-y-1.5">
@@ -339,6 +392,7 @@ export default function TicketDetailPage({
               )}
             </CardContent>
           </Card>
+          )}
         </div>
       </div>
     </div>

@@ -6,8 +6,9 @@ import { canViewTicket } from "@/lib/permissions";
 import { z } from "zod";
 
 const updateTicketSchema = z.object({
-  status: z.enum(["OPEN", "IN_PROGRESS", "PENDING", "CLOSED"]).optional(),
+  status: z.enum(["OPEN", "IN_PROGRESS", "PENDING", "CLOSED", "ACKNOWLEDGED"]).optional(),
   severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
+  deadline: z.string().nullable().optional(),
 });
 
 export async function GET(
@@ -66,6 +67,13 @@ export async function PATCH(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  if (ticket.status === "ACKNOWLEDGED") {
+    return NextResponse.json(
+      { error: "Acknowledged tickets cannot be modified" },
+      { status: 403 }
+    );
+  }
+
   const body = await req.json();
   const parsed = updateTicketSchema.safeParse(body);
   if (!parsed.success) {
@@ -75,11 +83,26 @@ export async function PATCH(
     );
   }
 
-  const events: { type: "STATUS_CHANGE"; oldValue: string; newValue: string; ticketId: string; userId: string }[] = [];
+  if (parsed.data.status === "ACKNOWLEDGED") {
+    if (session.user.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Only admins can acknowledge tickets" },
+        { status: 403 }
+      );
+    }
+    if (ticket.status !== "CLOSED") {
+      return NextResponse.json(
+        { error: "Only closed tickets can be acknowledged" },
+        { status: 400 }
+      );
+    }
+  }
+
+  const events: { type: "STATUS_CHANGE" | "ACKNOWLEDGED"; oldValue: string; newValue: string; ticketId: string; userId: string }[] = [];
 
   if (parsed.data.status && parsed.data.status !== ticket.status) {
     events.push({
-      type: "STATUS_CHANGE" as const,
+      type: parsed.data.status === "ACKNOWLEDGED" ? "ACKNOWLEDGED" as const : "STATUS_CHANGE" as const,
       oldValue: ticket.status,
       newValue: parsed.data.status,
       ticketId: id,
@@ -97,10 +120,15 @@ export async function PATCH(
     });
   }
 
+  const updateData: Record<string, unknown> = { ...parsed.data };
+  if (parsed.data.deadline !== undefined) {
+    updateData.deadline = parsed.data.deadline ? new Date(parsed.data.deadline) : null;
+  }
+
   const updated = await prisma.$transaction(async (tx) => {
     const result = await tx.ticket.update({
       where: { id },
-      data: parsed.data,
+      data: updateData,
       include: {
         creator: { select: { id: true, name: true } },
         manager: { select: { id: true, name: true } },

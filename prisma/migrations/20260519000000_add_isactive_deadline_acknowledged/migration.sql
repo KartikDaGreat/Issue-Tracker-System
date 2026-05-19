@@ -1,0 +1,11 @@
+-- AlterEnum
+ALTER TYPE "EventType" ADD VALUE 'ACKNOWLEDGED';
+
+-- AlterEnum
+ALTER TYPE "Status" ADD VALUE 'ACKNOWLEDGED';
+
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN "isActive" BOOLEAN NOT NULL DEFAULT true;
+
+-- AlterTable
+ALTER TABLE "Ticket" ADD COLUMN "deadline" TIMESTAMP(3);

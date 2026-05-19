@@ -5,6 +5,7 @@ const statusConfig: Record<string, { label: string; className: string }> = {
   IN_PROGRESS: { label: "In Progress", className: "bg-amber-50 text-amber-700 ring-1 ring-amber-600/20 hover:bg-amber-50" },
   PENDING: { label: "Pending", className: "bg-orange-50 text-orange-700 ring-1 ring-orange-600/20 hover:bg-orange-50" },
   CLOSED: { label: "Closed", className: "bg-gray-50 text-gray-600 ring-1 ring-gray-500/20 hover:bg-gray-50" },
+  ACKNOWLEDGED: { label: "Acknowledged", className: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20 hover:bg-emerald-50" },
 };
 
 export default function TicketStatusBadge({ status }: { status: string }) {

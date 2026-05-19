@@ -19,6 +19,8 @@ function eventDescription(event: TimelineEvent): string {
       return `${event.user.name} reassigned from ${event.oldValue} to ${event.newValue}`;
     case "COMMENT":
       return `${event.user.name} added a comment`;
+    case "ACKNOWLEDGED":
+      return `${event.user.name} acknowledged this ticket`;
     default:
       return `${event.user.name} performed an action`;
   }
@@ -40,6 +42,10 @@ const typeIcons: Record<string, { bg: string; icon: React.ReactNode }> = {
   COMMENT: {
     bg: "bg-gray-100 text-gray-500",
     icon: <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>,
+  },
+  ACKNOWLEDGED: {
+    bg: "bg-emerald-100 text-emerald-600",
+    icon: <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>,
   },
 };
 

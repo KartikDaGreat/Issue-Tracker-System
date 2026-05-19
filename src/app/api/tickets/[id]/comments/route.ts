@@ -56,6 +56,13 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  if (ticket.status === "ACKNOWLEDGED" && session.user.role !== "ADMIN") {
+    return NextResponse.json(
+      { error: "Only admins can comment on acknowledged tickets" },
+      { status: 403 }
+    );
+  }
+
   const body = await req.json();
   const parsed = commentSchema.safeParse(body);
   if (!parsed.success) {

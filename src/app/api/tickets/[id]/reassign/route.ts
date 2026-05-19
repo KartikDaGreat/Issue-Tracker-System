@@ -28,6 +28,13 @@ export async function PATCH(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  if (ticket.status === "ACKNOWLEDGED") {
+    return NextResponse.json(
+      { error: "Acknowledged tickets cannot be modified" },
+      { status: 403 }
+    );
+  }
+
   if (!canReassignTicket(session.user.role, session.user.id, ticket)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

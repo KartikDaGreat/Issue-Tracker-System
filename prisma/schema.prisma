@@ -40,6 +40,7 @@ enum Status {
   IN_PROGRESS
   PENDING
   CLOSED
+  ACKNOWLEDGED
 }
 
 enum EventType {
@@ -47,6 +48,7 @@ enum EventType {
   STATUS_CHANGE
   REASSIGNED
   COMMENT
+  ACKNOWLEDGED
 }
 
 model User {
@@ -55,6 +57,7 @@ model User {
   email          String         @unique
   hashedPassword String
   role           Role           @default(STAFF)
+  isActive       Boolean        @default(true)
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
@@ -74,6 +77,7 @@ model Ticket {
   title            String
   description      String
   dateOfOccurrence DateTime?
+  deadline         DateTime?
 
   creatorId        String
   creator          User          @relation("CreatedTickets", fields: [creatorId], references: [id])

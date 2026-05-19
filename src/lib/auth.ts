@@ -28,6 +28,8 @@ export const authOptions: NextAuthOptions = {
 
         if (!isValid) return null;
 
+        if (!user.isActive) return null;
+
         return {
           id: user.id,
           name: user.name,

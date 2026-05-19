@@ -21,6 +21,7 @@ const createTicketSchema = z.object({
   severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
   managerId: z.string().optional(),
   dateOfOccurrence: z.string().optional(),
+  deadline: z.string().optional(),
 });
 
 export async function GET(req: NextRequest) {
@@ -47,6 +48,11 @@ export async function GET(req: NextRequest) {
   if (category) where.category = category;
   if (severity) where.severity = severity;
 
+  const orderBy =
+    sort === "severity_deadline"
+      ? [{ severity: "desc" as const }, { deadline: "asc" as const }]
+      : { [sort]: order };
+
   const [tickets, total] = await Promise.all([
     prisma.ticket.findMany({
       where,
@@ -54,7 +60,7 @@ export async function GET(req: NextRequest) {
         creator: { select: { id: true, name: true } },
         manager: { select: { id: true, name: true } },
       },
-      orderBy: { [sort]: order },
+      orderBy,
       skip: (page - 1) * limit,
       take: limit,
     }),
@@ -90,6 +96,9 @@ export async function POST(req: NextRequest) {
         managerId: parsed.data.managerId || null,
         dateOfOccurrence: parsed.data.dateOfOccurrence
           ? new Date(parsed.data.dateOfOccurrence)
+          : null,
+        deadline: parsed.data.deadline
+          ? new Date(parsed.data.deadline)
           : null,
       },
       include: {

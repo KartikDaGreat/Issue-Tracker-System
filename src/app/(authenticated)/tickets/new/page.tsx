@@ -55,6 +55,7 @@ export default function NewTicketPage() {
       severity,
       managerId: managerId || undefined,
       dateOfOccurrence: form.get("dateOfOccurrence") || undefined,
+      deadline: form.get("deadline") || undefined,
     };
 
     const res = await fetch("/api/tickets", {
@@ -165,6 +166,18 @@ export default function NewTicketPage() {
                 <Input
                   id="dateOfOccurrence"
                   name="dateOfOccurrence"
+                  type="date"
+                  className="h-10"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="deadline" className="text-sm font-medium">Deadline</Label>
+                <Input
+                  id="deadline"
+                  name="deadline"
                   type="date"
                   className="h-10"
                 />

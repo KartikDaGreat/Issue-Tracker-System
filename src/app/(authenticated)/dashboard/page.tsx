@@ -22,6 +22,7 @@ interface Ticket {
   category: string;
   severity: string;
   status: string;
+  deadline: string | null;
   createdAt: string;
   creator: { id: string; name: string };
   manager: { id: string; name: string } | null;
@@ -45,11 +46,10 @@ export default function DashboardPage() {
       setLoading(true);
       const params = new URLSearchParams();
       if (status && status !== "all") params.set("status", status);
-      if (category) params.set("category", category);
-      if (severity) params.set("severity", severity);
+      if (category && category !== "all") params.set("category", category);
+      if (severity && severity !== "all") params.set("severity", severity);
       params.set("page", String(page));
-      params.set("sort", "severity");
-      params.set("order", "desc");
+      params.set("sort", "severity_deadline");
 
       const res = await fetch(`/api/tickets?${params}`);
       if (res.ok) {
@@ -64,7 +64,7 @@ export default function DashboardPage() {
 
   function setFilter(key: string, value: string) {
     const params = new URLSearchParams(searchParams.toString());
-    if (value && value !== "all") {
+    if (value) {
       params.set(key, value);
     } else {
       params.delete(key);
@@ -171,6 +171,7 @@ export default function DashboardPage() {
               <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
               <SelectItem value="PENDING">Pending</SelectItem>
               <SelectItem value="CLOSED">Closed</SelectItem>
+              <SelectItem value="ACKNOWLEDGED">Acknowledged</SelectItem>
             </SelectContent>
           </Select>
 

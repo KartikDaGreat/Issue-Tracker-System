@@ -17,12 +17,14 @@ interface Props {
   ticketId: string;
   comments: Comment[];
   onCommentAdded: () => void;
+  readonly?: boolean;
 }
 
 export default function CommentSection({
   ticketId,
   comments,
   onCommentAdded,
+  readonly,
 }: Props) {
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(false);
@@ -91,7 +93,7 @@ export default function CommentSection({
           );
         })}
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-2 pt-2 border-t">
+        {!readonly && <form onSubmit={handleSubmit} className="flex flex-col gap-2 pt-2 border-t">
           <Textarea
             placeholder="Write a comment..."
             value={body}
@@ -114,7 +116,7 @@ export default function CommentSection({
               )}
             </Button>
           </div>
-        </form>
+        </form>}
       </CardContent>
     </Card>
   );

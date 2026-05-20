@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
-import { google } from "googleapis";
+import * as fs from "fs";
+import * as path from "path";
 import { Readable } from "stream";
 
 const prisma = new PrismaClient();
@@ -12,17 +13,74 @@ function getLastWeekDate(): Date {
   return d;
 }
 
-async function getGoogleDrive() {
-  const keyJson = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!keyJson) throw new Error("GOOGLE_SERVICE_ACCOUNT_KEY env var is not set");
+async function getAccessToken(): Promise<string> {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
 
-  const key = JSON.parse(keyJson);
-  const auth = new google.auth.GoogleAuth({
-    credentials: key,
-    scopes: ["https://www.googleapis.com/auth/drive.file"],
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error("Missing GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, or GOOGLE_REFRESH_TOKEN");
+  }
+
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
   });
 
-  return google.drive({ version: "v3", auth });
+  const data = await res.json();
+  if (!data.access_token) {
+    throw new Error(`Failed to refresh access token: ${JSON.stringify(data)}`);
+  }
+
+  return data.access_token;
+}
+
+async function uploadToDrive(fileName: string, content: string) {
+  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  if (!folderId) throw new Error("GOOGLE_DRIVE_FOLDER_ID env var is not set");
+
+  const accessToken = await getAccessToken();
+
+  const metadata = {
+    name: fileName,
+    parents: [folderId],
+    mimeType: "application/json",
+  };
+
+  const boundary = "backup_boundary_" + Date.now();
+  const body =
+    `--${boundary}\r\n` +
+    `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Type: application/json\r\n\r\n` +
+    `${content}\r\n` +
+    `--${boundary}--`;
+
+  const res = await fetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": `multipart/related; boundary=${boundary}`,
+      },
+      body,
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Drive upload failed (${res.status}): ${err}`);
+  }
+
+  return res.json();
 }
 
 async function fetchChangedTickets(since: Date) {
@@ -44,30 +102,6 @@ async function fetchChangedTickets(since: Date) {
   });
 
   return tickets;
-}
-
-async function uploadToDrive(fileName: string, content: string) {
-  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
-  if (!folderId) throw new Error("GOOGLE_DRIVE_FOLDER_ID env var is not set");
-
-  const drive = await getGoogleDrive();
-
-  const fileStream = Readable.from(Buffer.from(content, "utf-8"));
-
-  const res = await drive.files.create({
-    requestBody: {
-      name: fileName,
-      parents: [folderId],
-      mimeType: "application/json",
-    },
-    media: {
-      mimeType: "application/json",
-      body: fileStream,
-    },
-    fields: "id, name, webViewLink",
-  });
-
-  return res.data;
 }
 
 async function main() {
@@ -95,8 +129,13 @@ async function main() {
   const content = JSON.stringify(backup, null, 2);
   const fileName = `tickets-backup-${dateStr}.json`;
 
-  console.log(`Uploading ${fileName} (${tickets.length} tickets)...`);
+  // Also save locally as artifact
+  const outDir = path.join(process.cwd(), "backup-output");
+  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(path.join(outDir, fileName), content, "utf-8");
 
+  // Upload to Google Drive
+  console.log(`Uploading ${fileName} (${tickets.length} tickets)...`);
   const file = await uploadToDrive(fileName, content);
 
   console.log(`Backup uploaded successfully.`);

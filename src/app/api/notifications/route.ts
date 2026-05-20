@@ -20,7 +20,9 @@ export async function GET() {
     }),
   ]);
 
-  return NextResponse.json({ notifications, unreadCount });
+  return NextResponse.json({ notifications, unreadCount }, {
+    headers: { "Cache-Control": "private, max-age=10, stale-while-revalidate=20" },
+  });
 }
 
 export async function PATCH() {

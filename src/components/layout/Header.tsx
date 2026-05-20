@@ -2,6 +2,7 @@
 
 import { useSession, signOut } from "next-auth/react";
 import Link from "next/link";
+import Image from "next/image";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,10 +26,13 @@ export default function Header() {
     <header className="sticky top-0 z-50 border-b bg-white/80 backdrop-blur-md">
       <div className="flex h-14 items-center justify-between px-4 md:px-6">
         <Link href="/dashboard" className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <img
+          <Image
             src="/logo.png"
             alt="KVMHSS"
+            width={160}
+            height={36}
             className="h-8 sm:h-9 w-auto shrink-0"
+            priority
           />
           <span className="text-gray-300 text-2xl font-thin select-none hidden sm:inline">|</span>
           <span className="text-sm sm:text-base font-semibold tracking-tight truncate hidden sm:inline">Ticket Tracker</span>

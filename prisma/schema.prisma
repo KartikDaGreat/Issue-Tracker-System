@@ -94,6 +94,7 @@ model Ticket {
   @@index([creatorId])
   @@index([managerId])
   @@index([status])
+  @@index([status, severity, deadline])
 }
 
 model Comment {
@@ -137,4 +138,5 @@ model Notification {
   user      User     @relation(fields: [userId], references: [id])
 
   @@index([userId])
+  @@index([userId, read])
 }

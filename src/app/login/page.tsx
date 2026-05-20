@@ -3,6 +3,7 @@
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,10 +39,13 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-white">
       <div className="w-full max-w-md px-4">
         <div className="mb-8 text-center">
-          <img
+          <Image
             src="/logo.png"
             alt="KV Matric Higher Secondary School"
+            width={320}
+            height={80}
             className="mx-auto mb-4 h-20 w-auto"
+            priority
           />
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">Ticket Tracker</h1>
           <p className="mt-2 text-sm text-muted-foreground">

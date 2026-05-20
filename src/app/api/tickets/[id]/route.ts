@@ -27,11 +27,23 @@ export async function GET(
       creator: { select: { id: true, name: true, email: true, role: true } },
       manager: { select: { id: true, name: true, email: true, role: true } },
       events: {
-        include: { user: { select: { id: true, name: true } } },
+        select: {
+          id: true,
+          type: true,
+          oldValue: true,
+          newValue: true,
+          createdAt: true,
+          user: { select: { id: true, name: true } },
+        },
         orderBy: { createdAt: "asc" },
       },
       comments: {
-        include: { author: { select: { id: true, name: true } } },
+        select: {
+          id: true,
+          body: true,
+          createdAt: true,
+          author: { select: { id: true, name: true } },
+        },
         orderBy: { createdAt: "asc" },
       },
     },

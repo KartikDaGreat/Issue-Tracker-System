@@ -56,7 +56,15 @@ export async function GET(req: NextRequest) {
   const [tickets, total] = await Promise.all([
     prisma.ticket.findMany({
       where,
-      include: {
+      select: {
+        id: true,
+        ticketNumber: true,
+        title: true,
+        category: true,
+        severity: true,
+        status: true,
+        deadline: true,
+        createdAt: true,
         creator: { select: { id: true, name: true } },
         manager: { select: { id: true, name: true } },
       },
@@ -67,7 +75,9 @@ export async function GET(req: NextRequest) {
     prisma.ticket.count({ where }),
   ]);
 
-  return NextResponse.json({ tickets, total, page, limit });
+  return NextResponse.json({ tickets, total, page, limit }, {
+    headers: { "Cache-Control": "private, max-age=5, stale-while-revalidate=15" },
+  });
 }
 
 export async function POST(req: NextRequest) {

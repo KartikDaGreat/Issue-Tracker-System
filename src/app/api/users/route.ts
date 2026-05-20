@@ -36,7 +36,9 @@ export async function GET(req: NextRequest) {
       select: { id: true, name: true, role: true },
       orderBy: { name: "asc" },
     });
-    return NextResponse.json(users);
+    return NextResponse.json(users, {
+      headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=120" },
+    });
   }
 
   // Full user list is admin-only

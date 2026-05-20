@@ -2,9 +2,10 @@ import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import * as fs from "fs";
 import * as path from "path";
-import { Readable } from "stream";
 
 const prisma = new PrismaClient();
+
+const isFullBackup = process.argv.includes("--full");
 
 function getLastWeekDate(): Date {
   const d = new Date();
@@ -83,9 +84,11 @@ async function uploadToDrive(fileName: string, content: string) {
   return res.json();
 }
 
-async function fetchChangedTickets(since: Date) {
+async function fetchTickets(since: Date | null) {
+  const where = since ? { updatedAt: { gte: since } } : {};
+
   const tickets = await prisma.ticket.findMany({
-    where: { updatedAt: { gte: since } },
+    where,
     include: {
       creator: { select: { id: true, name: true, email: true } },
       manager: { select: { id: true, name: true, email: true } },
@@ -105,31 +108,44 @@ async function fetchChangedTickets(since: Date) {
 }
 
 async function main() {
-  const since = getLastWeekDate();
   const now = new Date();
   const dateStr = now.toISOString().split("T")[0];
 
-  console.log(`Fetching tickets updated since ${since.toISOString()}...`);
+  let since: Date | null = null;
+  let filePrefix: string;
 
-  const tickets = await fetchChangedTickets(since);
+  if (isFullBackup) {
+    console.log("Running FULL backup of all tickets...");
+    filePrefix = "tickets-full-backup";
+  } else {
+    since = getLastWeekDate();
+    console.log(`Fetching tickets changed since ${since.toISOString()}...`);
+    filePrefix = "tickets-weekly-backup";
+  }
+
+  const tickets = await fetchTickets(since);
 
   if (tickets.length === 0) {
-    console.log("No tickets changed since last week. Skipping backup.");
+    console.log("No tickets to back up. Skipping.");
     return;
   }
 
   const backup = {
+    type: isFullBackup ? "full" : "weekly",
     generatedAt: now.toISOString(),
-    periodFrom: since.toISOString(),
+    periodFrom: since?.toISOString() ?? "all-time",
     periodTo: now.toISOString(),
     ticketCount: tickets.length,
+    note: isFullBackup
+      ? "Full backup — contains all tickets and their complete history."
+      : "Weekly backup — contains only tickets created or modified since periodFrom. To reconstruct full state, start from the latest full backup and apply weekly backups in order, keeping the newest version of each ticket by ID.",
     tickets,
   };
 
   const content = JSON.stringify(backup, null, 2);
-  const fileName = `tickets-backup-${dateStr}.json`;
+  const fileName = `${filePrefix}-${dateStr}.json`;
 
-  // Also save locally as artifact
+  // Save locally as artifact
   const outDir = path.join(process.cwd(), "backup-output");
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, fileName), content, "utf-8");

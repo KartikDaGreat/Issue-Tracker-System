@@ -11,7 +11,8 @@
     "db:migrate": "npx prisma migrate dev",
     "db:seed": "npx tsx prisma/seed.ts",
     "db:studio": "npx prisma studio",
-    "backup": "npx tsx scripts/weekly-backup.ts"
+    "backup": "npx tsx scripts/weekly-backup.ts",
+    "backup:full": "npx tsx scripts/weekly-backup.ts --full"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

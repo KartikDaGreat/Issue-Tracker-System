@@ -18,7 +18,25 @@ async function main() {
     },
   });
 
-  console.log("Seed complete: admin@school.com / admin123");
+  // Seed default inventory categories
+  const defaultCategories = [
+    "Lab Equipment",
+    "Classroom Devices",
+    "Stationery",
+    "Furniture",
+    "Electronics",
+    "Sports Equipment",
+  ];
+
+  for (const name of defaultCategories) {
+    await prisma.inventoryCategory.upsert({
+      where: { name },
+      update: {},
+      create: { name },
+    });
+  }
+
+  console.log("Seed complete: admin user + inventory categories");
 }
 
 main()

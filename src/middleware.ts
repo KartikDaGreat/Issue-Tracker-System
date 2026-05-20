@@ -22,9 +22,16 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard", req.url));
   }
 
+  if (pathname.startsWith("/inventory")) {
+    const allowed = ["ADMIN", "OFFICE_MANAGER", "FACILITIES_MANAGER"];
+    if (!allowed.includes(token.role as string)) {
+      return NextResponse.redirect(new URL("/dashboard", req.url));
+    }
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/tickets/:path*", "/admin/:path*", "/login"],
+  matcher: ["/dashboard/:path*", "/tickets/:path*", "/admin/:path*", "/inventory/:path*", "/login"],
 };

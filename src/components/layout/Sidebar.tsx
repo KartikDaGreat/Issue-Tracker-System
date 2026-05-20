@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -23,6 +24,14 @@ const navItems = [
     ),
   },
   {
+    href: "/inventory",
+    label: "Inventory",
+    roles: ["ADMIN", "OFFICE_MANAGER", "FACILITIES_MANAGER"],
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+    ),
+  },
+  {
     href: "/admin",
     label: "User Management",
     roles: ["ADMIN"],
@@ -35,6 +44,15 @@ const navItems = [
 export default function Sidebar() {
   const pathname = usePathname();
   const { data: session } = useSession();
+  const [closedCount, setClosedCount] = useState(0);
+
+  useEffect(() => {
+    if (session?.user.role === "ADMIN") {
+      fetch("/api/tickets?status=CLOSED&limit=1")
+        .then((res) => res.ok ? res.json() : null)
+        .then((data) => { if (data) setClosedCount(data.total); });
+    }
+  }, [session, pathname]);
 
   if (!session) return null;
 
@@ -66,6 +84,11 @@ export default function Sidebar() {
                 {item.icon}
               </span>
               {item.label}
+              {item.href === "/admin" && closedCount > 0 && (
+                <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                  {closedCount}
+                </span>
+              )}
             </Link>
           );
         })}

@@ -75,6 +75,7 @@ export default function AdminPage() {
   const [closedTickets, setClosedTickets] = useState<ClosedTicket[]>([]);
   const [loadingTickets, setLoadingTickets] = useState(false);
   const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
+  const [closedCount, setClosedCount] = useState(0);
 
   useEffect(() => {
     if (session && session.user.role !== "ADMIN") {
@@ -82,11 +83,20 @@ export default function AdminPage() {
       return;
     }
     fetchUsers();
+    fetchClosedCount();
   }, [session]);
 
   useEffect(() => {
     if (activeTab === "completed") fetchClosedTickets();
   }, [activeTab]);
+
+  async function fetchClosedCount() {
+    const res = await fetch("/api/tickets?status=CLOSED&limit=1");
+    if (res.ok) {
+      const data = await res.json();
+      setClosedCount(data.total);
+    }
+  }
 
   async function fetchUsers() {
     const res = await fetch("/api/users");
@@ -100,6 +110,7 @@ export default function AdminPage() {
     if (res.ok) {
       const data = await res.json();
       setClosedTickets(data.tickets);
+      setClosedCount(data.total);
     }
     setLoadingTickets(false);
   }
@@ -223,10 +234,15 @@ export default function AdminPage() {
           User Management
         </button>
         <button
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "completed" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-gray-700"}`}
+          className={`relative px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "completed" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-gray-700"}`}
           onClick={() => setActiveTab("completed")}
         >
           Completed Tasks
+          {closedCount > 0 && (
+            <span className="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+              {closedCount}
+            </span>
+          )}
         </button>
       </div>
 

@@ -61,11 +61,13 @@ model User {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  createdTickets Ticket[]       @relation("CreatedTickets")
-  managedTickets Ticket[]       @relation("ManagedTickets")
-  comments       Comment[]
-  notifications  Notification[]
-  ticketEvents   TicketEvent[]
+  createdTickets  Ticket[]          @relation("CreatedTickets")
+  managedTickets  Ticket[]          @relation("ManagedTickets")
+  comments        Comment[]
+  notifications   Notification[]
+  ticketEvents    TicketEvent[]
+  inventoryItems  InventoryItem[]
+  inventoryLogs   InventoryLog[]
 }
 
 model Ticket {
@@ -139,4 +141,58 @@ model Notification {
 
   @@index([userId])
   @@index([userId, read])
+}
+
+// Inventory Management
+
+enum InventoryAction {
+  PURCHASED
+  USED
+  BROKEN
+}
+
+model InventoryCategory {
+  id        String          @id @default(cuid())
+  name      String          @unique
+  createdAt DateTime        @default(now())
+
+  items     InventoryItem[]
+}
+
+model InventoryItem {
+  id          String            @id @default(cuid())
+  code        String            @unique
+  name        String
+  unit        String
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  categoryId  String
+  category    InventoryCategory @relation(fields: [categoryId], references: [id])
+
+  createdById String
+  createdBy   User              @relation(fields: [createdById], references: [id])
+
+  logs        InventoryLog[]
+
+  @@index([categoryId])
+}
+
+model InventoryLog {
+  id        String          @id @default(cuid())
+  action    InventoryAction
+  quantity  Int
+  details   String
+  date      DateTime
+  createdAt DateTime        @default(now())
+
+  itemId    String
+  item      InventoryItem   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  loggedById String
+  loggedBy   User           @relation(fields: [loggedById], references: [id])
+
+  @@index([itemId])
+  @@index([itemId, action])
 }

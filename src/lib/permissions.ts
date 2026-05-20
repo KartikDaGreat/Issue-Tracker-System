@@ -22,6 +22,14 @@ export function canManageUsers(userRole: Role): boolean {
   return userRole === Role.ADMIN;
 }
 
+export function canAccessInventory(userRole: Role | string): boolean {
+  return (
+    userRole === Role.ADMIN ||
+    userRole === Role.OFFICE_MANAGER ||
+    userRole === Role.FACILITIES_MANAGER
+  );
+}
+
 export function getTicketWhereClause(userRole: Role, userId: string) {
   if (userRole === Role.ADMIN || userRole === Role.PRINCIPAL) return {};
   return {

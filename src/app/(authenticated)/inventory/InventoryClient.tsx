@@ -105,7 +105,6 @@ export default function InventoryClient({ items, categories, role }: Props) {
   const [reportOpen, setReportOpen] = useState(false);
   const [reportPdfUrl, setReportPdfUrl] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
-  const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const [uploadingToDrive, setUploadingToDrive] = useState(false);
 
   const filteredItems =
@@ -246,7 +245,7 @@ export default function InventoryClient({ items, categories, role }: Props) {
     setReportOpen(true);
     setLoadingReport(true);
     setReportPdfUrl(null);
-    setDownloadMenuOpen(false);
+
     try {
       const res = await fetch("/api/inventory/report");
       if (!res.ok) {
@@ -268,7 +267,7 @@ export default function InventoryClient({ items, categories, role }: Props) {
       setReportPdfUrl(null);
     }
     setReportOpen(open);
-    setDownloadMenuOpen(false);
+
   }
 
   function handleLocalDownload() {
@@ -278,13 +277,13 @@ export default function InventoryClient({ items, categories, role }: Props) {
     a.href = reportPdfUrl;
     a.download = `inventory-report-${dateStr}.pdf`;
     a.click();
-    setDownloadMenuOpen(false);
+
     toast.success("Report downloaded");
   }
 
   async function handleDriveUpload() {
     setUploadingToDrive(true);
-    setDownloadMenuOpen(false);
+
     try {
       const res = await fetch("/api/inventory/report/drive", { method: "POST" });
       if (!res.ok) {
@@ -717,35 +716,26 @@ export default function InventoryClient({ items, categories, role }: Props) {
                 <DialogDescription>Usage and trend summary for all inventory items.</DialogDescription>
               </div>
               {reportPdfUrl && (
-                <div className="relative">
+                <div className="flex gap-2">
                   <Button
                     variant="outline"
                     size="sm"
                     className="gap-2"
-                    onClick={() => setDownloadMenuOpen(!downloadMenuOpen)}
-                    disabled={uploadingToDrive}
+                    onClick={handleLocalDownload}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                    {uploadingToDrive ? "Uploading..." : "Download"}
+                    Save to device
                   </Button>
-                  {downloadMenuOpen && (
-                    <div className="absolute right-0 top-full mt-1 z-50 w-52 rounded-md border bg-white shadow-lg py-1">
-                      <button
-                        className="flex w-full items-center gap-3 px-3 py-2 text-sm hover:bg-gray-50"
-                        onClick={handleLocalDownload}
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>
-                        Save to device
-                      </button>
-                      <button
-                        className="flex w-full items-center gap-3 px-3 py-2 text-sm hover:bg-gray-50"
-                        onClick={handleDriveUpload}
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.89 1.45l8 4A2 2 0 0 1 22 7.24v9.53a2 2 0 0 1-1.11 1.79l-8 4a2 2 0 0 1-1.79 0l-8-4a2 2 0 0 1-1.1-1.8V7.24a2 2 0 0 1 1.11-1.79l8-4a2 2 0 0 1 1.78 0Z"/><polyline points="2.32 6.16 12 11 21.68 6.16"/><line x1="12" x2="12" y1="22.76" y2="11"/></svg>
-                        Save to Google Drive
-                      </button>
-                    </div>
-                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={handleDriveUpload}
+                    disabled={uploadingToDrive}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+                    {uploadingToDrive ? "Uploading..." : "Save to Drive"}
+                  </Button>
                 </div>
               )}
             </div>

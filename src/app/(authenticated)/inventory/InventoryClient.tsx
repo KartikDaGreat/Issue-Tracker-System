@@ -101,6 +101,13 @@ export default function InventoryClient({ items, categories, role }: Props) {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [addingCategory, setAddingCategory] = useState(false);
 
+  // Report dialog
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportPdfUrl, setReportPdfUrl] = useState<string | null>(null);
+  const [loadingReport, setLoadingReport] = useState(false);
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const [uploadingToDrive, setUploadingToDrive] = useState(false);
+
   const filteredItems =
     categoryFilter === "all"
       ? items
@@ -235,6 +242,65 @@ export default function InventoryClient({ items, categories, role }: Props) {
     router.refresh();
   }
 
+  async function openReport() {
+    setReportOpen(true);
+    setLoadingReport(true);
+    setReportPdfUrl(null);
+    setDownloadMenuOpen(false);
+    try {
+      const res = await fetch("/api/inventory/report");
+      if (!res.ok) {
+        toast.error("Failed to generate report");
+        setReportOpen(false);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setReportPdfUrl(url);
+    } finally {
+      setLoadingReport(false);
+    }
+  }
+
+  function handleCloseReport(open: boolean) {
+    if (!open && reportPdfUrl) {
+      URL.revokeObjectURL(reportPdfUrl);
+      setReportPdfUrl(null);
+    }
+    setReportOpen(open);
+    setDownloadMenuOpen(false);
+  }
+
+  function handleLocalDownload() {
+    if (!reportPdfUrl) return;
+    const dateStr = new Date().toISOString().split("T")[0];
+    const a = document.createElement("a");
+    a.href = reportPdfUrl;
+    a.download = `inventory-report-${dateStr}.pdf`;
+    a.click();
+    setDownloadMenuOpen(false);
+    toast.success("Report downloaded");
+  }
+
+  async function handleDriveUpload() {
+    setUploadingToDrive(true);
+    setDownloadMenuOpen(false);
+    try {
+      const res = await fetch("/api/inventory/report/drive", { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json();
+        toast.error(err.error || "Failed to upload to Google Drive");
+        return;
+      }
+      const data = await res.json();
+      toast.success(`Uploaded to Google Drive: ${data.name}`, {
+        action: data.link ? { label: "Open", onClick: () => window.open(data.link, "_blank") } : undefined,
+      });
+    } finally {
+      setUploadingToDrive(false);
+    }
+  }
+
   const actionColor: Record<string, string> = {
     PURCHASED: "bg-green-100 text-green-800",
     USED: "bg-blue-100 text-blue-800",
@@ -251,6 +317,12 @@ export default function InventoryClient({ items, categories, role }: Props) {
           </p>
         </div>
         <div className="flex gap-2">
+          {isAdmin && (
+            <Button variant="outline" onClick={openReport} className="gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+              Generate Report
+            </Button>
+          )}
           <Button variant="outline" onClick={() => setCategoriesOpen(true)}>
             Categories
           </Button>
@@ -632,6 +704,66 @@ export default function InventoryClient({ items, categories, role }: Props) {
             </div>
           </div>
           <DialogFooter showCloseButton />
+        </DialogContent>
+      </Dialog>
+
+      {/* Inventory Report Dialog */}
+      <Dialog open={reportOpen} onOpenChange={handleCloseReport}>
+        <DialogContent className="sm:max-w-4xl h-[85vh] flex flex-col">
+          <DialogHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle>Inventory Report</DialogTitle>
+                <DialogDescription>Usage and trend summary for all inventory items.</DialogDescription>
+              </div>
+              {reportPdfUrl && (
+                <div className="relative">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => setDownloadMenuOpen(!downloadMenuOpen)}
+                    disabled={uploadingToDrive}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                    {uploadingToDrive ? "Uploading..." : "Download"}
+                  </Button>
+                  {downloadMenuOpen && (
+                    <div className="absolute right-0 top-full mt-1 z-50 w-52 rounded-md border bg-white shadow-lg py-1">
+                      <button
+                        className="flex w-full items-center gap-3 px-3 py-2 text-sm hover:bg-gray-50"
+                        onClick={handleLocalDownload}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>
+                        Save to device
+                      </button>
+                      <button
+                        className="flex w-full items-center gap-3 px-3 py-2 text-sm hover:bg-gray-50"
+                        onClick={handleDriveUpload}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.89 1.45l8 4A2 2 0 0 1 22 7.24v9.53a2 2 0 0 1-1.11 1.79l-8 4a2 2 0 0 1-1.79 0l-8-4a2 2 0 0 1-1.1-1.8V7.24a2 2 0 0 1 1.11-1.79l8-4a2 2 0 0 1 1.78 0Z"/><polyline points="2.32 6.16 12 11 21.68 6.16"/><line x1="12" x2="12" y1="22.76" y2="11"/></svg>
+                        Save to Google Drive
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </DialogHeader>
+          {loadingReport ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center space-y-3">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-primary mx-auto" />
+                <p className="text-sm text-muted-foreground">Generating report...</p>
+              </div>
+            </div>
+          ) : reportPdfUrl ? (
+            <iframe
+              src={reportPdfUrl}
+              className="flex-1 w-full rounded-md border"
+              title="Inventory Report PDF"
+            />
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>

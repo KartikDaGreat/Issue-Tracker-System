@@ -55,7 +55,11 @@ export default function MobileNav() {
       <div className="flex items-center justify-around px-2 py-1">
         {filtered.map((item) => {
           const isActive =
-            pathname === item.href || pathname.startsWith(item.href + "/");
+            pathname === item.href ||
+            (pathname.startsWith(item.href + "/") &&
+              item.href === filtered
+                .filter((n) => pathname === n.href || pathname.startsWith(n.href + "/"))
+                .sort((a, b) => b.href.length - a.href.length)[0]?.href);
           return (
             <Link
               key={item.href}

@@ -65,6 +65,7 @@ export async function GET(req: NextRequest) {
         status: true,
         deadline: true,
         createdAt: true,
+        updatedAt: true,
         creator: { select: { id: true, name: true } },
         manager: { select: { id: true, name: true } },
       },

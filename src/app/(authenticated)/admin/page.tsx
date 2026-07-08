@@ -106,7 +106,7 @@ export default function AdminPage() {
 
   async function fetchClosedTickets() {
     setLoadingTickets(true);
-    const res = await fetch("/api/tickets?status=CLOSED&limit=100");
+    const res = await fetch("/api/tickets?status=CLOSED&limit=100&sort=ticketNumber&order=desc");
     if (res.ok) {
       const data = await res.json();
       setClosedTickets(data.tickets);

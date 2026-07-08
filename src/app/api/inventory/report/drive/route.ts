@@ -37,25 +37,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  const folderId = process.env.GOOGLE_DRIVE_REPORTS_FOLDER_ID;
   if (!folderId) {
-    return NextResponse.json({ error: "Google Drive folder not configured" }, { status: 500 });
+    return NextResponse.json({ error: "Google Drive reports folder not configured" }, { status: 500 });
   }
 
-  // Fetch the PDF from our own report endpoint
-  const origin = req.headers.get("origin") || req.headers.get("host") || "";
-  const protocol = origin.startsWith("http") ? "" : "https://";
-  const reportUrl = `${protocol}${origin}/api/inventory/report`;
-
-  const pdfRes = await fetch(reportUrl, {
-    headers: { cookie: req.headers.get("cookie") || "" },
-  });
-
-  if (!pdfRes.ok) {
-    return NextResponse.json({ error: "Failed to generate report PDF" }, { status: 500 });
+  const pdfBuffer = await req.arrayBuffer();
+  if (!pdfBuffer.byteLength) {
+    return NextResponse.json({ error: "No PDF data received" }, { status: 400 });
   }
 
-  const pdfBuffer = await pdfRes.arrayBuffer();
   const dateStr = new Date().toISOString().split("T")[0];
   const fileName = `inventory-report-${dateStr}.pdf`;
 
@@ -75,7 +66,6 @@ export async function POST(req: Request) {
   const boundary = "report_boundary_" + Date.now();
   const metaJson = JSON.stringify(metadata);
 
-  // Build multipart body
   const encoder = new TextEncoder();
   const pdfBytes = new Uint8Array(pdfBuffer);
 

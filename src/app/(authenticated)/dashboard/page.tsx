@@ -47,7 +47,7 @@ export default async function DashboardPage({ searchParams }: Props) {
       prisma.ticket.findMany({
         where,
         select: ticketSelect,
-        orderBy: [{ severity: "desc" }, { deadline: "asc" }],
+        orderBy: { ticketNumber: "desc" },
         skip: (page - 1) * limit,
         take: limit,
       }),

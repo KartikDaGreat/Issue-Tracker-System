@@ -104,6 +104,7 @@ export default function InventoryClient({ items, categories, role }: Props) {
   // Report dialog
   const [reportOpen, setReportOpen] = useState(false);
   const [reportPdfUrl, setReportPdfUrl] = useState<string | null>(null);
+  const [reportPdfBlob, setReportPdfBlob] = useState<Blob | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [uploadingToDrive, setUploadingToDrive] = useState(false);
 
@@ -245,7 +246,7 @@ export default function InventoryClient({ items, categories, role }: Props) {
     setReportOpen(true);
     setLoadingReport(true);
     setReportPdfUrl(null);
-
+    setReportPdfBlob(null);
     try {
       const res = await fetch("/api/inventory/report");
       if (!res.ok) {
@@ -254,8 +255,8 @@ export default function InventoryClient({ items, categories, role }: Props) {
         return;
       }
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      setReportPdfUrl(url);
+      setReportPdfBlob(blob);
+      setReportPdfUrl(URL.createObjectURL(blob));
     } finally {
       setLoadingReport(false);
     }
@@ -265,6 +266,7 @@ export default function InventoryClient({ items, categories, role }: Props) {
     if (!open && reportPdfUrl) {
       URL.revokeObjectURL(reportPdfUrl);
       setReportPdfUrl(null);
+      setReportPdfBlob(null);
     }
     setReportOpen(open);
 

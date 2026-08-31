@@ -12,12 +12,19 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
-import TicketTable, { type TicketRow } from "@/components/tickets/TicketTable";
+import TicketTable, {
+  type TicketRow,
+  type TicketSection,
+} from "@/components/tickets/TicketTable";
 import { apiJson, errorMessage } from "@/lib/fetcher";
 import { CATEGORIES, SEVERITIES, STATUSES } from "@/lib/validation";
-import { humanizeEnum } from "@/lib/format";
+import {
+  CATEGORY_LABELS,
+  SEVERITY_LABELS,
+  STATUS_LABELS,
+  labelFor,
+} from "@/lib/format";
 
 interface Filters {
   status: string;
@@ -31,7 +38,8 @@ interface Filters {
 interface Props {
   role: string;
   userId: string;
-  tickets: TicketRow[];
+  myTickets: TicketRow[];
+  otherTickets: TicketRow[];
   total: number;
   page: number;
   limit: number;
@@ -134,7 +142,8 @@ const statCards = [
 
 export default function DashboardClient({
   role,
-  tickets,
+  myTickets,
+  otherTickets,
   total,
   page,
   limit,
@@ -155,6 +164,20 @@ export default function DashboardClient({
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
+  const tickets = useMemo(
+    () => [...myTickets, ...otherTickets],
+    [myTickets, otherTickets]
+  );
+
+  // Only band the list when there is genuinely something to separate; a lone
+  // heading over a single group is just noise.
+  const sections = useMemo<TicketSection[] | undefined>(() => {
+    if (myTickets.length === 0 || otherTickets.length === 0) return undefined;
+    return [
+      { label: "Assigned to me", tone: "mine", tickets: myTickets },
+      { label: "Other tickets", tone: "other", tickets: otherTickets },
+    ];
+  }, [myTickets, otherTickets]);
 
   function updateParams(changes: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams.toString());
@@ -341,13 +364,15 @@ export default function DashboardClient({
               onValueChange={(v) => v && updateParams({ status: v })}
             >
               <SelectTrigger className="h-9 w-40">
-                <SelectValue placeholder="Status" />
+                {filters.status === "all"
+                  ? "All Statuses"
+                  : labelFor(STATUS_LABELS, filters.status)}
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
-                {STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {humanizeEnum(s)}
+                {STATUSES.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {labelFor(STATUS_LABELS, option)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -358,13 +383,15 @@ export default function DashboardClient({
               onValueChange={(v) => v && updateParams({ category: v })}
             >
               <SelectTrigger className="h-9 w-44">
-                <SelectValue placeholder="Category" />
+                {filters.category === "all"
+                  ? "All Categories"
+                  : labelFor(CATEGORY_LABELS, filters.category)}
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
-                {CATEGORIES.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {humanizeEnum(c)}
+                {CATEGORIES.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {labelFor(CATEGORY_LABELS, option)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -375,13 +402,15 @@ export default function DashboardClient({
               onValueChange={(v) => v && updateParams({ severity: v })}
             >
               <SelectTrigger className="h-9 w-36">
-                <SelectValue placeholder="Severity" />
+                {filters.severity === "all"
+                  ? "All Severity"
+                  : labelFor(SEVERITY_LABELS, filters.severity)}
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Severity</SelectItem>
-                {SEVERITIES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {humanizeEnum(s)}
+                {SEVERITIES.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {labelFor(SEVERITY_LABELS, option)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -434,12 +463,12 @@ export default function DashboardClient({
               disabled={bulkWorking}
             >
               <SelectTrigger className="h-8 w-40">
-                <SelectValue placeholder="Set status" />
+                <span className="text-muted-foreground">Set status</span>
               </SelectTrigger>
               <SelectContent>
-                {STATUSES.filter((s) => s !== "ACKNOWLEDGED").map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {humanizeEnum(s)}
+                {STATUSES.filter((o) => o !== "ACKNOWLEDGED").map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {labelFor(STATUS_LABELS, option)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -450,12 +479,12 @@ export default function DashboardClient({
               disabled={bulkWorking}
             >
               <SelectTrigger className="h-8 w-40">
-                <SelectValue placeholder="Set severity" />
+                <span className="text-muted-foreground">Set severity</span>
               </SelectTrigger>
               <SelectContent>
-                {SEVERITIES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {humanizeEnum(s)}
+                {SEVERITIES.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {labelFor(SEVERITY_LABELS, option)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -513,7 +542,8 @@ export default function DashboardClient({
           <>
             <div className={isPending ? "opacity-60 transition-opacity" : ""}>
               <TicketTable
-                tickets={tickets}
+                tickets={sections ? undefined : tickets}
+                sections={sections}
                 selection={{
                   selectedIds,
                   onToggle: toggleOne,

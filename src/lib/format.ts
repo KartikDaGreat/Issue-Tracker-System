@@ -87,3 +87,61 @@ export function formatDateTime(value: string | Date | null | undefined): string 
     minute: "2-digit",
   });
 }
+
+/**
+ * Display labels for the enum values.
+ *
+ * `humanizeEnum` only swaps underscores for spaces, which yields shouty
+ * "IN PROGRESS" in places that want sentence case. These maps are what the UI
+ * should render; keep `humanizeEnum` for badges that are deliberately caps.
+ */
+export const STATUS_LABELS: Record<string, string> = {
+  OPEN: "Open",
+  IN_PROGRESS: "In Progress",
+  PENDING: "Pending",
+  CLOSED: "Closed",
+  ACKNOWLEDGED: "Acknowledged",
+};
+
+export const SEVERITY_LABELS: Record<string, string> = {
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+  CRITICAL: "Critical",
+};
+
+export const CATEGORY_LABELS: Record<string, string> = {
+  ACADEMICS: "Academics",
+  PARENT_ISSUES: "Parent Issues",
+  STUDENT_ISSUES: "Student Issues",
+  FACILITIES_ISSUES: "Facilities",
+  STAFF_ISSUES: "Staff Issues",
+  SECURITY: "Security",
+  TRANSPORT: "Transport",
+  MISCELLANEOUS: "Miscellaneous",
+};
+
+export const ROLE_LABELS: Record<string, string> = {
+  ADMIN: "Admin",
+  PRINCIPAL: "Principal",
+  ACADEMIC_HEAD: "Academic Head",
+  FACILITIES_MANAGER: "Facilities Manager",
+  OFFICE_MANAGER: "Office Manager",
+  STAFF: "Staff",
+};
+
+export const INVENTORY_ACTION_LABELS: Record<string, string> = {
+  PURCHASED: "Purchased",
+  USED: "Used",
+  BROKEN: "Broken",
+};
+
+/** Falls back to a humanised value so an unmapped enum never renders raw. */
+export function labelFor(
+  map: Record<string, string>,
+  value: string | null | undefined,
+  fallback = "—"
+): string {
+  if (!value) return fallback;
+  return map[value] ?? humanizeEnum(value);
+}

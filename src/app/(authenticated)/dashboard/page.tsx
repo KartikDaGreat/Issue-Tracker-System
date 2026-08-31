@@ -61,23 +61,36 @@ export default async function DashboardPage({ searchParams }: Props) {
     status: { notIn: ["CLOSED", "ACKNOWLEDGED"] },
   };
 
+  // Tickets assigned to the viewer sort above everyone else's, which is what
+  // gives the list its two banded sections.
+  //
+  // The split is done with two independently paginated queries rather than by
+  // filtering the page in JavaScript. Filtering after `take` — as this page
+  // previously did — meant the section counts only described the current page,
+  // and your own tickets vanished from their section entirely on page 2.
+  //
+  // `managerId: { not: userId }` alone would drop unassigned rows, since SQL
+  // comparisons against NULL are never true, so nulls are matched explicitly.
+  const mineWhere: Prisma.TicketWhereInput = {
+    AND: [where, { managerId: userId }],
+  };
+  const othersWhere: Prisma.TicketWhereInput = {
+    AND: [
+      where,
+      { OR: [{ managerId: null }, { managerId: { not: userId } }] },
+    ],
+  };
+
   const [
-    tickets,
-    total,
+    mineTotal,
+    othersTotal,
     openCount,
     inProgressCount,
     criticalCount,
     overdueCount,
-    assignedToMeCount,
   ] = await Promise.all([
-    prisma.ticket.findMany({
-      where,
-      select: ticketListSelect,
-      orderBy: { ticketNumber: "desc" },
-      skip: (page - 1) * limit,
-      take: limit,
-    }),
-    prisma.ticket.count({ where }),
+    prisma.ticket.count({ where: mineWhere }),
+    prisma.ticket.count({ where: othersWhere }),
     prisma.ticket.count({ where: { AND: [baseWhere, { status: "OPEN" }] } }),
     prisma.ticket.count({
       where: { AND: [baseWhere, { status: "IN_PROGRESS" }] },
@@ -90,23 +103,51 @@ export default async function DashboardPage({ searchParams }: Props) {
         AND: [baseWhere, { deadline: { lt: new Date() } }, activeStatuses],
       },
     }),
-    // Counted across the whole filtered set, not just the current page. The
-    // "Assigned to Me" heading used to count only what happened to land on
-    // page 1.
-    prisma.ticket.count({ where: { AND: [where, { managerId: userId }] } }),
   ]);
 
-  const serialized = tickets.map((t) => ({
-    ...t,
-    deadline: t.deadline?.toISOString() ?? null,
-    createdAt: t.createdAt.toISOString(),
-  }));
+  const total = mineTotal + othersTotal;
+  const skip = (page - 1) * limit;
+
+  // Treat the two groups as one continuous list: take what this page needs
+  // from "mine" first, then fill the remainder from "others".
+  const mineTake = Math.max(0, Math.min(limit, mineTotal - skip));
+  const othersSkip = Math.max(0, skip - mineTotal);
+  const othersTake = limit - mineTake;
+
+  const [mine, others] = await Promise.all([
+    mineTake > 0
+      ? prisma.ticket.findMany({
+          where: mineWhere,
+          select: ticketListSelect,
+          orderBy: { ticketNumber: "desc" },
+          skip: Math.min(skip, mineTotal),
+          take: mineTake,
+        })
+      : Promise.resolve([]),
+    othersTake > 0
+      ? prisma.ticket.findMany({
+          where: othersWhere,
+          select: ticketListSelect,
+          orderBy: { ticketNumber: "desc" },
+          skip: othersSkip,
+          take: othersTake,
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const serialize = (rows: typeof mine) =>
+    rows.map((t) => ({
+      ...t,
+      deadline: t.deadline?.toISOString() ?? null,
+      createdAt: t.createdAt.toISOString(),
+    }));
 
   return (
     <DashboardClient
       role={session.user.role}
       userId={userId}
-      tickets={serialized}
+      myTickets={serialize(mine)}
+      otherTickets={serialize(others)}
       total={total}
       page={page}
       limit={limit}
@@ -114,7 +155,7 @@ export default async function DashboardPage({ searchParams }: Props) {
       inProgressCount={inProgressCount}
       criticalCount={criticalCount}
       overdueCount={overdueCount}
-      assignedToMeCount={assignedToMeCount}
+      assignedToMeCount={mineTotal}
       filters={{
         status: params.get("status") ?? "OPEN",
         category: params.get("category") ?? "all",

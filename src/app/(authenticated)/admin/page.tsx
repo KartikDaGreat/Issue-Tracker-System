@@ -27,13 +27,12 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import SeverityBadge from "@/components/tickets/SeverityBadge";
 import InitialsAvatar from "@/components/common/Avatar";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import { apiFetch, apiJson, errorMessage } from "@/lib/fetcher";
-import { formatDate, humanizeEnum } from "@/lib/format";
+import { ROLE_LABELS, formatDate, labelFor } from "@/lib/format";
 import { ROLES } from "@/lib/validation";
 
 interface User {
@@ -379,7 +378,9 @@ export default function AdminPage() {
               }}
             >
               <SelectTrigger className="h-9 w-36">
-                <SelectValue />
+                {{ all: "All users", active: "Active only", inactive: "Inactive only" }[
+                  statusFilter
+                ] ?? "All users"}
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All users</SelectItem>
@@ -440,7 +441,7 @@ export default function AdminPage() {
                                 {user.email}
                               </p>
                               <p className="text-xs text-muted-foreground sm:hidden">
-                                {humanizeEnum(user.role)}
+                                {labelFor(ROLE_LABELS, user.role)}
                               </p>
                             </div>
                           </div>
@@ -451,7 +452,7 @@ export default function AdminPage() {
                               roleColors[user.role] ?? roleColors.STAFF
                             }`}
                           >
-                            {humanizeEnum(user.role)}
+                            {labelFor(ROLE_LABELS, user.role)}
                           </Badge>
                         </TableCell>
                         <TableCell>
@@ -673,12 +674,12 @@ export default function AdminPage() {
               <label className="text-sm font-medium">Role</label>
               <Select value={editRole} onValueChange={(v) => v && setEditRole(v)}>
                 <SelectTrigger className="h-10">
-                  <SelectValue />
+                  {labelFor(ROLE_LABELS, editRole)}
                 </SelectTrigger>
                 <SelectContent>
                   {ROLES.map((role) => (
                     <SelectItem key={role} value={role}>
-                      {humanizeEnum(role)}
+                      {labelFor(ROLE_LABELS, role)}
                     </SelectItem>
                   ))}
                 </SelectContent>

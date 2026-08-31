@@ -12,7 +12,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import TicketStatusBadge from "@/components/tickets/TicketStatusBadge";
@@ -25,9 +24,13 @@ import InitialsAvatar from "@/components/common/Avatar";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import { apiFetch, apiJson, errorMessage } from "@/lib/fetcher";
 import {
+  CATEGORY_LABELS,
+  ROLE_LABELS,
+  SEVERITY_LABELS,
+  STATUS_LABELS,
   formatDate,
-  humanizeEnum,
   isOverdue,
+  labelFor,
   toDateInputValue,
 } from "@/lib/format";
 import { CATEGORIES, LIMITS, SEVERITIES } from "@/lib/validation";
@@ -276,12 +279,12 @@ export default function TicketDetailClient({
                         }
                       >
                         <SelectTrigger className="h-9">
-                          <SelectValue />
+                          {labelFor(CATEGORY_LABELS, draft.category)}
                         </SelectTrigger>
                         <SelectContent>
-                          {CATEGORIES.map((c) => (
-                            <SelectItem key={c} value={c}>
-                              {humanizeEnum(c)}
+                          {CATEGORIES.map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {labelFor(CATEGORY_LABELS, option)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -364,7 +367,7 @@ export default function TicketDetailClient({
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Category</span>
                 <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium">
-                  {humanizeEnum(ticket.category)}
+                  {labelFor(CATEGORY_LABELS, ticket.category)}
                 </span>
               </div>
               <Separator />
@@ -447,12 +450,12 @@ export default function TicketDetailClient({
                     }
                   >
                     <SelectTrigger className="h-9">
-                      <SelectValue />
+                      {labelFor(STATUS_LABELS, ticket.status)}
                     </SelectTrigger>
                     <SelectContent>
-                      {STATUS_OPTIONS.map((s) => (
-                        <SelectItem key={s} value={s}>
-                          {humanizeEnum(s)}
+                      {STATUS_OPTIONS.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {labelFor(STATUS_LABELS, option)}
                         </SelectItem>
                       ))}
                       {isAdmin && ticket.status === "CLOSED" && (
@@ -480,12 +483,12 @@ export default function TicketDetailClient({
                     }
                   >
                     <SelectTrigger className="h-9">
-                      <SelectValue />
+                      {labelFor(SEVERITY_LABELS, ticket.severity)}
                     </SelectTrigger>
                     <SelectContent>
-                      {SEVERITIES.map((s) => (
-                        <SelectItem key={s} value={s}>
-                          {humanizeEnum(s)}
+                      {SEVERITIES.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {labelFor(SEVERITY_LABELS, option)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -524,12 +527,29 @@ export default function TicketDetailClient({
                     }
                   >
                     <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Unassigned" />
+                      {ticket.manager ? (
+                        <span className="flex items-center gap-2 truncate">
+                          <InitialsAvatar
+                            name={ticket.manager.name}
+                            className="h-5 w-5 text-[10px]"
+                          />
+                          <span className="truncate">{ticket.manager.name}</span>
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">Unassigned</span>
+                      )}
                     </SelectTrigger>
-                    <SelectContent>
+                    {/* The popup would otherwise inherit the narrow trigger
+                        width and clip longer names against the card edge. */}
+                    <SelectContent className="min-w-64">
                       {users.map((u) => (
                         <SelectItem key={u.id} value={u.id}>
-                          {u.name} · {humanizeEnum(u.role)}
+                          <span className="flex flex-col">
+                            <span>{u.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {labelFor(ROLE_LABELS, u.role)}
+                            </span>
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>

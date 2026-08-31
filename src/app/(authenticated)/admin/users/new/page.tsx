@@ -12,11 +12,10 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { apiJson, errorMessage, RequestError } from "@/lib/fetcher";
-import { humanizeEnum } from "@/lib/format";
+import { ROLE_LABELS, labelFor } from "@/lib/format";
 import { LIMITS, ROLES } from "@/lib/validation";
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -102,12 +101,12 @@ export default function NewUserPage() {
               <Label className="text-sm font-medium">Role</Label>
               <Select value={role} onValueChange={(v) => v && setRole(v)}>
                 <SelectTrigger className="h-10">
-                  <SelectValue />
+                  {labelFor(ROLE_LABELS, role)}
                 </SelectTrigger>
                 <SelectContent>
                   {ROLES.map((r) => (
                     <SelectItem key={r} value={r}>
-                      {humanizeEnum(r)}
+                      {labelFor(ROLE_LABELS, r)}
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -14,7 +14,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import {
   Table,
@@ -34,7 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import { apiFetch, apiJson, errorMessage } from "@/lib/fetcher";
-import { formatDate } from "@/lib/format";
+import { INVENTORY_ACTION_LABELS, formatDate, labelFor } from "@/lib/format";
 import { INVENTORY_ACTIONS, LIMITS } from "@/lib/validation";
 
 interface InventoryItem {
@@ -523,11 +522,10 @@ export default function InventoryClient({
             onValueChange={(v) => v && setCategoryFilter(v)}
           >
             <SelectTrigger className="h-9 w-48">
-              <SelectValue placeholder="All Categories">
-                {categoryFilter === "all"
-                  ? "All Categories"
-                  : categories.find((c) => c.id === categoryFilter)?.name}
-              </SelectValue>
+              {categoryFilter === "all"
+                ? "All Categories"
+                : (categories.find((c) => c.id === categoryFilter)?.name ??
+                  "All Categories")}
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Categories</SelectItem>
@@ -540,7 +538,9 @@ export default function InventoryClient({
           </Select>
           <Select value={stockFilter} onValueChange={(v) => v && setStockFilter(v)}>
             <SelectTrigger className="h-9 w-40">
-              <SelectValue />
+              {{ all: "All stock", low: "Low stock", out: "Out of stock" }[
+                stockFilter
+              ] ?? "All stock"}
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All stock</SelectItem>
@@ -725,10 +725,9 @@ export default function InventoryClient({
                 }
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select category">
-                    {categories.find((c) => c.id === newItem.categoryId)?.name ??
-                      "Select category"}
-                  </SelectValue>
+                  {categories.find((c) => c.id === newItem.categoryId)?.name ?? (
+                    <span className="text-muted-foreground">Select category</span>
+                  )}
                 </SelectTrigger>
                 <SelectContent>
                   {categories.map((c) => (
@@ -812,9 +811,9 @@ export default function InventoryClient({
                 }
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue>
-                    {categories.find((c) => c.id === editDraft.categoryId)?.name}
-                  </SelectValue>
+                  {categories.find((c) => c.id === editDraft.categoryId)?.name ?? (
+                    <span className="text-muted-foreground">Select category</span>
+                  )}
                 </SelectTrigger>
                 <SelectContent>
                   {categories.map((c) => (
@@ -864,12 +863,12 @@ export default function InventoryClient({
               <Label>Action</Label>
               <Select value={logAction} onValueChange={(v) => v && setLogAction(v)}>
                 <SelectTrigger className="w-full">
-                  <SelectValue />
+                  {labelFor(INVENTORY_ACTION_LABELS, logAction)}
                 </SelectTrigger>
                 <SelectContent>
                   {INVENTORY_ACTIONS.map((action) => (
                     <SelectItem key={action} value={action}>
-                      {action.charAt(0) + action.slice(1).toLowerCase()}
+                      {labelFor(INVENTORY_ACTION_LABELS, action)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -979,7 +978,7 @@ export default function InventoryClient({
                         actionColor[log.action] ?? "bg-muted"
                       }`}
                     >
-                      {log.action}
+                      {labelFor(INVENTORY_ACTION_LABELS, log.action)}
                     </span>
                     <span className="text-sm font-medium">
                       {log.action === "PURCHASED" ? "+" : "−"}

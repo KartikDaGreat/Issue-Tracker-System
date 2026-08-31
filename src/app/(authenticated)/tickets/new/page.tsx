@@ -12,13 +12,17 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import InitialsAvatar from "@/components/common/Avatar";
 import { apiFetch, apiJson, errorMessage, RequestError } from "@/lib/fetcher";
 import { CATEGORIES, LIMITS, SEVERITIES } from "@/lib/validation";
-import { humanizeEnum } from "@/lib/format";
+import {
+  CATEGORY_LABELS,
+  ROLE_LABELS,
+  SEVERITY_LABELS,
+  labelFor,
+} from "@/lib/format";
 
 interface UserOption {
   id: string;
@@ -68,7 +72,7 @@ export default function NewTicketPage() {
 
   const groupedUsers = ROLE_ORDER.map((role) => ({
     role,
-    label: humanizeEnum(role),
+    label: labelFor(ROLE_LABELS, role),
     users: users.filter((u) => u.role === role),
   })).filter((group) => group.users.length > 0);
 
@@ -188,12 +192,18 @@ export default function NewTicketPage() {
                   onValueChange={(v) => v && setCategory(v)}
                 >
                   <SelectTrigger className="h-10">
-                    <SelectValue placeholder="Select category" />
+                    {category ? (
+                      labelFor(CATEGORY_LABELS, category)
+                    ) : (
+                      <span className="text-muted-foreground">
+                        Select category
+                      </span>
+                    )}
                   </SelectTrigger>
                   <SelectContent>
-                    {CATEGORIES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {humanizeEnum(c)}
+                    {CATEGORIES.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {labelFor(CATEGORY_LABELS, option)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -208,12 +218,12 @@ export default function NewTicketPage() {
                   onValueChange={(v) => v && setSeverity(v)}
                 >
                   <SelectTrigger className="h-10">
-                    <SelectValue />
+                    {labelFor(SEVERITY_LABELS, severity)}
                   </SelectTrigger>
                   <SelectContent>
-                    {SEVERITIES.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {humanizeEnum(s)}
+                    {SEVERITIES.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {labelFor(SEVERITY_LABELS, option)}
                       </SelectItem>
                     ))}
                   </SelectContent>

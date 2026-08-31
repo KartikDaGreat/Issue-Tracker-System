@@ -47,7 +47,7 @@ export default function Sidebar() {
   return (
     <aside className="hidden w-60 shrink-0 border-r bg-background md:block">
       <nav className="flex flex-col gap-1 p-3 pt-4">
-        <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <p className="mb-2 px-3 label-caps">
           Navigation
         </p>
         {items.map((item) => {

@@ -64,13 +64,13 @@ export default function TicketTable({ tickets, selection }: Props) {
               </TableHead>
             )}
             <TableHead className={selection ? "w-20" : "w-20 pl-4"}>#</TableHead>
-            <TableHead>Title</TableHead>
-            <TableHead className="hidden md:table-cell">Category</TableHead>
+            <TableHead className="w-full">Title</TableHead>
+            <TableHead className="hidden xl:table-cell">Category</TableHead>
             <TableHead>Severity</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="hidden lg:table-cell">Assigned To</TableHead>
-            <TableHead className="hidden md:table-cell">Deadline</TableHead>
-            <TableHead className="hidden pr-4 sm:table-cell">Created</TableHead>
+            <TableHead className="hidden lg:table-cell">Deadline</TableHead>
+            <TableHead className="hidden pr-4 xl:table-cell">Created</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -101,18 +101,19 @@ export default function TicketTable({ tickets, selection }: Props) {
                     #{ticket.ticketNumber}
                   </Link>
                 </TableCell>
-                <TableCell>
+                <TableCell className="w-full max-w-0">
                   <Link
                     href={`/tickets/${ticket.id}`}
-                    className="font-medium text-foreground transition-colors group-hover:text-primary"
+                    title={ticket.title}
+                    className="block truncate font-medium text-foreground transition-colors group-hover:text-primary"
                   >
                     {ticket.title}
                   </Link>
-                  <p className="mt-0.5 text-xs text-muted-foreground md:hidden">
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground xl:hidden">
                     {humanizeEnum(ticket.category)}
                   </p>
                 </TableCell>
-                <TableCell className="hidden md:table-cell">
+                <TableCell className="hidden xl:table-cell">
                   <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                     {humanizeEnum(ticket.category)}
                   </span>
@@ -135,7 +136,7 @@ export default function TicketTable({ tickets, selection }: Props) {
                     </span>
                   )}
                 </TableCell>
-                <TableCell className="hidden text-sm md:table-cell">
+                <TableCell className="hidden text-sm lg:table-cell">
                   {ticket.deadline ? (
                     <span
                       className={
@@ -151,7 +152,7 @@ export default function TicketTable({ tickets, selection }: Props) {
                     <span className="text-muted-foreground">-</span>
                   )}
                 </TableCell>
-                <TableCell className="hidden pr-4 text-sm text-muted-foreground sm:table-cell">
+                <TableCell className="hidden pr-4 text-sm text-muted-foreground xl:table-cell">
                   {formatDate(ticket.createdAt)}
                 </TableCell>
               </TableRow>

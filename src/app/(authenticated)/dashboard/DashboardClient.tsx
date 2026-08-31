@@ -264,7 +264,7 @@ export default function DashboardClient({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+          <h1 className="text-2xl font-bold">Dashboard</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {role === "ADMIN" || role === "PRINCIPAL"
               ? "Overview of all tickets"
@@ -304,10 +304,10 @@ export default function DashboardClient({
           >
             <CardContent className="flex items-center justify-between p-4">
               <div className="min-w-0">
-                <p className="truncate text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <p className="truncate label-caps">
                   {card.label}
                 </p>
-                <p className={`mt-1 text-2xl font-bold ${card.tone}`}>
+                <p className={`mt-1 text-2xl font-bold tabular ${card.tone}`}>
                   {stats[card.key]}
                 </p>
               </div>

@@ -459,7 +459,7 @@ export default function InventoryClient({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Inventory</h1>
+          <h1 className="text-2xl font-bold">Inventory</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Manage school inventory items and stock levels
           </p>
@@ -483,24 +483,24 @@ export default function InventoryClient({
 
       <div className="grid grid-cols-3 gap-4">
         <Card className="border-0 p-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="label-caps">
             Items
           </p>
-          <p className="mt-1 text-2xl font-bold">{items.length}</p>
+          <p className="mt-1 text-2xl font-bold tabular">{items.length}</p>
         </Card>
         <Card className="border-0 p-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="label-caps">
             Low stock
           </p>
-          <p className="mt-1 text-2xl font-bold text-amber-600 dark:text-amber-400">
+          <p className="mt-1 text-2xl font-bold tabular text-amber-600 dark:text-amber-400">
             {lowStock}
           </p>
         </Card>
         <Card className="border-0 p-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="label-caps">
             Out of stock
           </p>
-          <p className="mt-1 text-2xl font-bold text-red-600 dark:text-red-400">
+          <p className="mt-1 text-2xl font-bold tabular text-red-600 dark:text-red-400">
             {outOfStock}
           </p>
         </Card>

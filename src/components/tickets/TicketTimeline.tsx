@@ -151,7 +151,7 @@ export default function TicketTimeline({ events }: { events: TimelineEvent[] }) 
   return (
     <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+        <CardTitle className="label-caps text-[13px]">
           Activity
         </CardTitle>
       </CardHeader>

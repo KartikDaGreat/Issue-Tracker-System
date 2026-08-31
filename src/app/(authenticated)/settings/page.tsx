@@ -2,19 +2,11 @@
 
 import { useState } from "react";
 import { useSession } from "next-auth/react";
-import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import InitialsAvatar from "@/components/common/Avatar";
 import { apiJson, errorMessage } from "@/lib/fetcher";
 import { humanizeEnum } from "@/lib/format";
@@ -23,7 +15,6 @@ const MIN_PASSWORD_LENGTH = 8;
 
 export default function SettingsPage() {
   const { data: session } = useSession();
-  const { theme, setTheme } = useTheme();
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -65,7 +56,7 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+        <h1 className="text-2xl font-bold">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Manage your account and preferences.
         </p>
@@ -73,7 +64,7 @@ export default function SettingsPage() {
 
       <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          <CardTitle className="label-caps text-[13px]">
             Profile
           </CardTitle>
         </CardHeader>
@@ -96,35 +87,7 @@ export default function SettingsPage() {
 
       <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-            Appearance
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium">Theme</p>
-              <p className="text-xs text-muted-foreground">
-                Follow your device setting, or pick one.
-              </p>
-            </div>
-            <Select value={theme ?? "system"} onValueChange={(v) => v && setTheme(v)}>
-              <SelectTrigger className="h-9 w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="light">Light</SelectItem>
-                <SelectItem value="dark">Dark</SelectItem>
-                <SelectItem value="system">System</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          <CardTitle className="label-caps text-[13px]">
             Change password
           </CardTitle>
         </CardHeader>

@@ -71,7 +71,7 @@ function LoginForm() {
             className="mx-auto mb-4 h-20 w-auto"
             priority
           />
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">
+          <h1 className="text-3xl font-bold text-foreground">
             Ticket Tracker
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">

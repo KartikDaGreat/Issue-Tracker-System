@@ -208,7 +208,7 @@ export default function TicketDetailClient({
           />
         ) : (
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">
+            <h1 className="text-2xl font-bold">
               <span className="text-primary">#{ticket.ticketNumber}</span>{" "}
               {ticket.title}
             </h1>
@@ -240,7 +240,7 @@ export default function TicketDetailClient({
         <div className="space-y-6 lg:col-span-2">
           <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
             <CardHeader className="flex-row items-center justify-between pb-3">
-              <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+              <CardTitle className="label-caps text-[13px]">
                 Description
               </CardTitle>
               {canModify && !editing && (
@@ -356,7 +356,7 @@ export default function TicketDetailClient({
         <div className="space-y-4">
           <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+              <CardTitle className="label-caps text-[13px]">
                 Details
               </CardTitle>
             </CardHeader>
@@ -431,7 +431,7 @@ export default function TicketDetailClient({
                 </div>
               )}
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                <CardTitle className="label-caps text-[13px]">
                   Actions
                 </CardTitle>
               </CardHeader>

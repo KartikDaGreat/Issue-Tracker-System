@@ -14,12 +14,16 @@ export default async function AuthenticatedLayout({
   if (!session) redirect("/login");
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div className="flex min-h-screen flex-col overflow-x-hidden bg-background">
       <Header />
       <div className="flex flex-1">
         <Sidebar />
-        <main className="flex-1 overflow-auto p-4 pb-20 md:p-8 md:pb-8">
-          <div className="mx-auto max-w-6xl">
+        {/* min-w-0 is what stops a wide table from stretching the page: a
+            flex item defaults to min-width:auto and will not shrink below its
+            content, so the overflow escaped to the document instead of
+            staying inside the table's own scroll container. */}
+        <main className="min-w-0 flex-1 p-4 pb-20 md:p-8 md:pb-8">
+          <div className="mx-auto w-full max-w-6xl">
             {children}
           </div>
         </main>

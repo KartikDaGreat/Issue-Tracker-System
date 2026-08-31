@@ -11,7 +11,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import NotificationBell from "./NotificationBell";
-import ThemeToggle from "@/components/common/ThemeToggle";
 import InitialsAvatar from "@/components/common/Avatar";
 import { humanizeEnum } from "@/lib/format";
 
@@ -44,7 +43,6 @@ export default function Header() {
           </span>
         </Link>
         <div className="flex items-center gap-1">
-          <ThemeToggle />
           <NotificationBell />
           <DropdownMenu>
             <DropdownMenuTrigger className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-accent">

@@ -168,7 +168,7 @@ export default function ReportsClient() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Reports</h1>
+        <h1 className="text-2xl font-bold">Reports</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Ticket volume, workload and resolution performance.
         </p>
@@ -179,10 +179,10 @@ export default function ReportsClient() {
           <Link key={card.label} href={card.href}>
             <Card className="border-0 shadow-sm ring-1 ring-black/5 transition-shadow hover:shadow-md dark:ring-white/10">
               <CardContent className="p-4">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <p className="label-caps">
                   {card.label}
                 </p>
-                <p className={`mt-1 text-2xl font-bold ${card.tone ?? ""}`}>
+                <p className={`mt-1 text-2xl font-bold tabular ${card.tone ?? ""}`}>
                   {card.value}
                 </p>
               </CardContent>
@@ -193,7 +193,7 @@ export default function ReportsClient() {
 
       <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          <CardTitle className="label-caps text-[13px]">
             Resolution time
           </CardTitle>
         </CardHeader>
@@ -206,19 +206,19 @@ export default function ReportsClient() {
             <div className="grid gap-6 sm:grid-cols-3">
               <div>
                 <p className="text-xs text-muted-foreground">Median</p>
-                <p className="mt-1 text-xl font-bold">
+                <p className="mt-1 text-xl font-bold tabular">
                   {formatHours(stats.resolution.medianHours)}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Average</p>
-                <p className="mt-1 text-xl font-bold">
+                <p className="mt-1 text-xl font-bold tabular">
                   {formatHours(stats.resolution.averageHours)}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Based on</p>
-                <p className="mt-1 text-xl font-bold">
+                <p className="mt-1 text-xl font-bold tabular">
                   {stats.resolution.sampleSize}
                 </p>
                 <p className="text-xs text-muted-foreground">closed tickets</p>
@@ -231,7 +231,7 @@ export default function ReportsClient() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+            <CardTitle className="label-caps text-[13px]">
               By category
             </CardTitle>
           </CardHeader>
@@ -254,7 +254,7 @@ export default function ReportsClient() {
 
         <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+            <CardTitle className="label-caps text-[13px]">
               By severity
             </CardTitle>
           </CardHeader>
@@ -279,7 +279,7 @@ export default function ReportsClient() {
 
       <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          <CardTitle className="label-caps text-[13px]">
             Workload by assignee
           </CardTitle>
         </CardHeader>
@@ -315,7 +315,7 @@ export default function ReportsClient() {
 
       <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          <CardTitle className="label-caps text-[13px]">
             Volume over the last 6 months
           </CardTitle>
         </CardHeader>

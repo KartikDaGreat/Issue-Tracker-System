@@ -1,28 +1,53 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { canAccessInventory } from "@/lib/permissions";
-import { z } from "zod";
+import {
+  handler,
+  requireSession,
+  parseBody,
+  badRequest,
+  forbidden,
+  conflict,
+  json,
+} from "@/lib/api";
+import { getMovementByItem, EMPTY_MOVEMENT, stockStatus } from "@/lib/inventory";
+import { LIMITS, parseSearch, trimmedString } from "@/lib/validation";
+import type { Prisma } from "@prisma/client";
 
 const createItemSchema = z.object({
-  code: z.string().min(1).max(50),
-  name: z.string().min(1).max(200),
-  categoryId: z.string().min(1),
-  unit: z.string().min(1).max(50),
+  code: trimmedString(LIMITS.itemCode, "Item code"),
+  name: trimmedString(LIMITS.itemName, "Item name"),
+  categoryId: z.string().min(1, "Choose a category."),
+  unit: trimmedString(LIMITS.unit, "Unit"),
 });
 
-export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session || !canAccessInventory(session.user.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+export const GET = handler(async (req: NextRequest) => {
+  const user = await requireSession();
+  if (!canAccessInventory(user.role)) throw forbidden();
+
+  const params = req.nextUrl.searchParams;
+  const where: Prisma.InventoryItemWhereInput = {};
+
+  // Deactivated items were previously unreachable through the API entirely,
+  // so there was no way to review or reactivate one.
+  const status = params.get("status") ?? "active";
+  if (status === "active") where.isActive = true;
+  else if (status === "inactive") where.isActive = false;
+  else if (status !== "all") {
+    throw badRequest(`"${status}" is not a valid status filter.`);
   }
 
-  const { searchParams } = new URL(req.url);
-  const categoryId = searchParams.get("categoryId");
+  const categoryId = params.get("categoryId");
+  if (categoryId && categoryId !== "all") where.categoryId = categoryId;
 
-  const where: Record<string, unknown> = { isActive: true };
-  if (categoryId) where.categoryId = categoryId;
+  const search = parseSearch(params.get("search"));
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: "insensitive" } },
+      { code: { contains: search, mode: "insensitive" } },
+    ];
+  }
 
   const items = await prisma.inventoryItem.findMany({
     where,
@@ -34,55 +59,60 @@ export async function GET(req: NextRequest) {
       isActive: true,
       updatedAt: true,
       category: { select: { id: true, name: true } },
-      logs: {
-        select: { action: true, quantity: true },
-      },
     },
     orderBy: { name: "asc" },
   });
 
+  // Stock comes from a single grouped aggregate rather than loading every log
+  // row for every item into memory.
+  const movement = await getMovementByItem(items.map((i) => i.id));
+
   const result = items.map((item) => {
-    let stock = 0;
-    for (const log of item.logs) {
-      if (log.action === "PURCHASED") stock += log.quantity;
-      else stock -= log.quantity;
-    }
-    const { logs: _, ...rest } = item;
-    return { ...rest, quantityAvailable: stock };
+    const m = movement.get(item.id) ?? EMPTY_MOVEMENT;
+    return {
+      ...item,
+      quantityAvailable: m.stock,
+      totalPurchased: m.purchased,
+      totalUsed: m.used,
+      totalBroken: m.broken,
+      stockStatus: stockStatus(m.stock),
+    };
   });
 
-  return NextResponse.json(result);
-}
+  return json(result);
+});
 
-export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session || !canAccessInventory(session.user.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+export const POST = handler(async (req: NextRequest) => {
+  const user = await requireSession();
+  if (!canAccessInventory(user.role)) throw forbidden();
 
-  const body = await req.json();
-  const parsed = createItemSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten().fieldErrors }, { status: 400 });
-  }
+  const data = await parseBody(req, createItemSchema);
+
+  const category = await prisma.inventoryCategory.findUnique({
+    where: { id: data.categoryId },
+    select: { id: true },
+  });
+  if (!category) throw badRequest("That category does not exist.");
 
   const existing = await prisma.inventoryItem.findUnique({
-    where: { code: parsed.data.code },
+    where: { code: data.code },
+    select: { id: true },
   });
-  if (existing) {
-    return NextResponse.json({ error: "Item code already exists" }, { status: 409 });
-  }
+  if (existing) throw conflict("That item code is already in use.");
 
   const item = await prisma.inventoryItem.create({
     data: {
-      code: parsed.data.code,
-      name: parsed.data.name,
-      categoryId: parsed.data.categoryId,
-      unit: parsed.data.unit,
-      createdById: session.user.id,
+      code: data.code,
+      name: data.name,
+      categoryId: data.categoryId,
+      unit: data.unit,
+      createdById: user.id,
     },
     include: { category: { select: { id: true, name: true } } },
   });
 
-  return NextResponse.json(item, { status: 201 });
-}
+  return NextResponse.json(
+    { ...item, quantityAvailable: 0, stockStatus: "OUT" },
+    { status: 201 }
+  );
+});

@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, Fragment } from "react";
 import { toast } from "sonner";
 import Fuse from "fuse.js";
 import * as XLSX from "xlsx";
+import { apiFetch, errorMessage } from "@/lib/fetcher";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -415,25 +416,46 @@ export default function PerformanceClient() {
     ? [...new Set(results.map((r) => r.section).filter(Boolean))].sort()
     : [];
 
-  // Load saved files on mount
-  useEffect(() => {
-    fetchSavedFiles();
+  const fetchSavedFiles = useCallback(async () => {
+    try {
+      const data = await apiFetch<{
+        files: SavedFile[];
+        academicYear: string;
+      }>("/api/performance/files");
+      setSavedFiles(data.files);
+      setAcademicYear(data.academicYear);
+    } catch {
+      // Saved files are an optional convenience; a failure here should not
+      // block the analysis workflow.
+    } finally {
+      setLoadingFiles(false);
+    }
   }, []);
 
-  async function fetchSavedFiles() {
-    setLoadingFiles(true);
-    try {
-      const res = await fetch("/api/performance/files");
-      if (res.ok) {
-        const data = await res.json();
+  useEffect(() => {
+    // Declared inline rather than calling the shared callback: the lint rule
+    // treats any effect that invokes a setState-containing function as a
+    // synchronous state update.
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await apiFetch<{
+          files: SavedFile[];
+          academicYear: string;
+        }>("/api/performance/files");
+        if (cancelled) return;
         setSavedFiles(data.files);
         setAcademicYear(data.academicYear);
+      } catch {
+        // Saved files are an optional convenience.
+      } finally {
+        if (!cancelled) setLoadingFiles(false);
       }
-    } catch {
-      // Silently fail — saved files are optional
-    }
-    setLoadingFiles(false);
-  }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSaveFile(file: File, label: string) {
     setSavingFile(true);
@@ -442,22 +464,18 @@ export default function PerformanceClient() {
       formData.append("file", file);
       formData.append("label", label);
 
-      const res = await fetch("/api/performance/files", {
+      await apiFetch("/api/performance/files", {
         method: "POST",
         body: formData,
       });
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Upload failed");
-      }
-
       toast.success(`Saved "${label}" to Drive`);
-      fetchSavedFiles();
+      await fetchSavedFiles();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save file");
+      toast.error(errorMessage(err));
+    } finally {
+      setSavingFile(false);
     }
-    setSavingFile(false);
   }
 
   const hasSource1 = !!(source1.file || source1.savedId);

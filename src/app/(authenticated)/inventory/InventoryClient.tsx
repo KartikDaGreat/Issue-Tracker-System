@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -31,7 +32,10 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { toast } from "sonner";
+import ConfirmDialog from "@/components/common/ConfirmDialog";
+import { apiFetch, apiJson, errorMessage } from "@/lib/fetcher";
+import { formatDate } from "@/lib/format";
+import { INVENTORY_ACTIONS, LIMITS } from "@/lib/validation";
 
 interface InventoryItem {
   id: string;
@@ -42,6 +46,10 @@ interface InventoryItem {
   updatedAt: string;
   category: { id: string; name: string };
   quantityAvailable: number;
+  totalPurchased?: number;
+  totalUsed?: number;
+  totalBroken?: number;
+  stockStatus?: string;
 }
 
 interface Category {
@@ -57,268 +65,407 @@ interface LogEntry {
   details: string;
   date: string;
   createdAt: string;
+  voidedAt: string | null;
+  voidReason: string | null;
   loggedBy: { id: string; name: string };
+  voidedBy: { id: string; name: string } | null;
 }
 
 interface Props {
   items: InventoryItem[];
   categories: Category[];
   role: string;
+  canDownloadReport: boolean;
 }
 
-export default function InventoryClient({ items, categories, role }: Props) {
+const LOW_STOCK_THRESHOLD = 5;
+
+const actionColor: Record<string, string> = {
+  PURCHASED:
+    "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300",
+  USED: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
+  BROKEN: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
+};
+
+export default function InventoryClient({
+  items,
+  categories,
+  role,
+  canDownloadReport,
+}: Props) {
   const router = useRouter();
   const isAdmin = role === "ADMIN";
+  const today = new Date().toISOString().split("T")[0];
 
-  // Filter state
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [stockFilter, setStockFilter] = useState("all");
 
-  // Add item dialog
   const [addItemOpen, setAddItemOpen] = useState(false);
-  const [newCode, setNewCode] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newCategory, setNewCategory] = useState("");
-  const [newUnit, setNewUnit] = useState("");
+  const [newItem, setNewItem] = useState({
+    code: "",
+    name: "",
+    categoryId: "",
+    unit: "",
+  });
   const [addingItem, setAddingItem] = useState(false);
 
-  // Log dialog
+  const [editItem, setEditItem] = useState<InventoryItem | null>(null);
+  const [editDraft, setEditDraft] = useState({
+    name: "",
+    code: "",
+    unit: "",
+    categoryId: "",
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
+
   const [logOpen, setLogOpen] = useState(false);
-  const [logItemId, setLogItemId] = useState("");
-  const [logAction, setLogAction] = useState("PURCHASED");
+  const [logItem, setLogItem] = useState<InventoryItem | null>(null);
+  const [logAction, setLogAction] = useState<string>("PURCHASED");
   const [logQuantity, setLogQuantity] = useState("");
   const [logDetails, setLogDetails] = useState("");
-  const [logDate, setLogDate] = useState(new Date().toISOString().split("T")[0]);
+  const [logDate, setLogDate] = useState(today);
   const [submittingLog, setSubmittingLog] = useState(false);
 
-  // History dialog
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyItem, setHistoryItem] = useState<InventoryItem | null>(null);
   const [historyLogs, setHistoryLogs] = useState<LogEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [showVoided, setShowVoided] = useState(false);
 
-  // Category management dialog
+  const [voidTarget, setVoidTarget] = useState<LogEntry | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [addingCategory, setAddingCategory] = useState(false);
+  const [deleteCategoryTarget, setDeleteCategoryTarget] =
+    useState<Category | null>(null);
 
-  // Report dialog
+  const [deactivateTarget, setDeactivateTarget] = useState<InventoryItem | null>(
+    null
+  );
+
   const [reportOpen, setReportOpen] = useState(false);
   const [reportPdfUrl, setReportPdfUrl] = useState<string | null>(null);
-  const [reportPdfBlob, setReportPdfBlob] = useState<Blob | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [uploadingToDrive, setUploadingToDrive] = useState(false);
 
-  const filteredItems =
-    categoryFilter === "all"
-      ? items
-      : items.filter((i) => i.category.id === categoryFilter);
+  // Release the object URL if the component unmounts with the preview open.
+  useEffect(() => {
+    return () => {
+      if (reportPdfUrl) URL.revokeObjectURL(reportPdfUrl);
+    };
+  }, [reportPdfUrl]);
+
+  const filteredItems = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return items.filter((item) => {
+      if (categoryFilter !== "all" && item.category.id !== categoryFilter) {
+        return false;
+      }
+      if (stockFilter === "out" && item.quantityAvailable > 0) return false;
+      if (
+        stockFilter === "low" &&
+        !(
+          item.quantityAvailable > 0 &&
+          item.quantityAvailable <= LOW_STOCK_THRESHOLD
+        )
+      ) {
+        return false;
+      }
+      if (
+        query &&
+        !item.name.toLowerCase().includes(query) &&
+        !item.code.toLowerCase().includes(query)
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [items, categoryFilter, stockFilter, search]);
+
+  const outOfStock = items.filter((i) => i.quantityAvailable <= 0).length;
+  const lowStock = items.filter(
+    (i) => i.quantityAvailable > 0 && i.quantityAvailable <= LOW_STOCK_THRESHOLD
+  ).length;
 
   async function handleAddItem() {
-    if (!newCode || !newName || !newCategory || !newUnit) return;
+    if (addingItem) return;
+    const { code, name, categoryId, unit } = newItem;
+    if (!code.trim() || !name.trim() || !categoryId || !unit.trim()) {
+      toast.error("Fill in every field to add an item.");
+      return;
+    }
+
     setAddingItem(true);
     try {
-      const res = await fetch("/api/inventory", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: newCode,
-          name: newName,
-          categoryId: newCategory,
-          unit: newUnit,
-        }),
+      await apiJson("/api/inventory", "POST", {
+        code: code.trim(),
+        name: name.trim(),
+        categoryId,
+        unit: unit.trim(),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        toast.error(err.error || "Failed to add item");
-        return;
-      }
       toast.success("Item added");
       setAddItemOpen(false);
-      setNewCode("");
-      setNewName("");
-      setNewCategory("");
-      setNewUnit("");
+      setNewItem({ code: "", name: "", categoryId: "", unit: "" });
       router.refresh();
+    } catch (err) {
+      toast.error(errorMessage(err));
     } finally {
       setAddingItem(false);
     }
   }
 
-  function openLogDialog(itemId: string) {
-    setLogItemId(itemId);
+  function openEdit(item: InventoryItem) {
+    setEditItem(item);
+    setEditDraft({
+      name: item.name,
+      code: item.code,
+      unit: item.unit,
+      categoryId: item.category.id,
+    });
+  }
+
+  async function handleSaveEdit() {
+    if (!editItem || savingEdit) return;
+
+    const body: Record<string, unknown> = {};
+    if (editDraft.name.trim() !== editItem.name) body.name = editDraft.name.trim();
+    if (editDraft.code.trim() !== editItem.code) body.code = editDraft.code.trim();
+    if (editDraft.unit.trim() !== editItem.unit) body.unit = editDraft.unit.trim();
+    if (editDraft.categoryId !== editItem.category.id) {
+      body.categoryId = editDraft.categoryId;
+    }
+
+    if (Object.keys(body).length === 0) {
+      setEditItem(null);
+      return;
+    }
+
+    setSavingEdit(true);
+    try {
+      await apiJson(`/api/inventory/${editItem.id}`, "PATCH", body);
+      toast.success("Item updated");
+      setEditItem(null);
+      router.refresh();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  function openLogDialog(item: InventoryItem) {
+    setLogItem(item);
     setLogAction("PURCHASED");
     setLogQuantity("");
     setLogDetails("");
-    setLogDate(new Date().toISOString().split("T")[0]);
+    setLogDate(today);
     setLogOpen(true);
   }
 
   async function handleSubmitLog() {
-    if (!logQuantity || !logDetails || !logDate) return;
+    if (!logItem || submittingLog) return;
+
+    const quantity = Number(logQuantity);
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      toast.error("Enter a whole quantity greater than zero.");
+      return;
+    }
+    if (!logDetails.trim()) {
+      toast.error("Add a short note describing this entry.");
+      return;
+    }
+    // The server enforces this too; checking here avoids a pointless round-trip.
+    if (logAction !== "PURCHASED" && quantity > logItem.quantityAvailable) {
+      toast.error(
+        `Only ${logItem.quantityAvailable} ${logItem.unit} in stock.`
+      );
+      return;
+    }
+
     setSubmittingLog(true);
     try {
-      const res = await fetch(`/api/inventory/${logItemId}/logs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: logAction,
-          quantity: parseInt(logQuantity),
-          details: logDetails,
-          date: logDate,
-        }),
+      await apiJson(`/api/inventory/${logItem.id}/logs`, "POST", {
+        action: logAction,
+        quantity,
+        details: logDetails.trim(),
+        date: logDate,
       });
-      if (!res.ok) {
-        const err = await res.json();
-        toast.error(err.error || "Failed to log entry");
-        return;
-      }
-      toast.success("Log entry added");
+      toast.success("Stock entry recorded");
       setLogOpen(false);
       router.refresh();
+    } catch (err) {
+      toast.error(errorMessage(err));
     } finally {
       setSubmittingLog(false);
     }
   }
 
-  async function openHistory(item: InventoryItem) {
+  async function loadHistory(item: InventoryItem, includeVoided = showVoided) {
     setHistoryItem(item);
     setHistoryOpen(true);
     setLoadingHistory(true);
     try {
-      const res = await fetch(`/api/inventory/${item.id}/logs`);
-      const data = await res.json();
-      setHistoryLogs(data);
+      const data = await apiFetch<{ logs: LogEntry[] }>(
+        `/api/inventory/${item.id}/logs?limit=100&includeVoided=${includeVoided}`
+      );
+      setHistoryLogs(data.logs);
+    } catch (err) {
+      toast.error(errorMessage(err));
+      setHistoryLogs([]);
     } finally {
       setLoadingHistory(false);
     }
   }
 
-  async function handleDeactivate(itemId: string) {
-    const res = await fetch(`/api/inventory/${itemId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: false }),
-    });
-    if (!res.ok) {
-      toast.error("Failed to deactivate item");
+  async function handleVoid() {
+    if (!voidTarget || !historyItem) return;
+    if (!voidReason.trim()) {
+      toast.error("Give a reason for voiding this entry.");
       return;
     }
-    toast.success("Item deactivated");
-    router.refresh();
+
+    try {
+      await apiJson(
+        `/api/inventory/${historyItem.id}/logs/${voidTarget.id}`,
+        "POST",
+        { reason: voidReason.trim() }
+      );
+      toast.success("Entry voided and stock corrected");
+      setVoidTarget(null);
+      setVoidReason("");
+      await loadHistory(historyItem);
+      router.refresh();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
   }
 
   async function handleAddCategory() {
-    if (!newCategoryName.trim()) return;
+    if (addingCategory || !newCategoryName.trim()) return;
     setAddingCategory(true);
     try {
-      const res = await fetch("/api/inventory/categories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newCategoryName.trim() }),
+      await apiJson("/api/inventory/categories", "POST", {
+        name: newCategoryName.trim(),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        toast.error(err.error || "Failed to add category");
-        return;
-      }
       toast.success("Category added");
       setNewCategoryName("");
       router.refresh();
+    } catch (err) {
+      toast.error(errorMessage(err));
     } finally {
       setAddingCategory(false);
     }
   }
 
-  async function handleDeleteCategory(catId: string) {
-    const res = await fetch(`/api/inventory/categories/${catId}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      toast.error(err.error || "Failed to delete category");
-      return;
+  async function handleDeleteCategory() {
+    if (!deleteCategoryTarget) return;
+    try {
+      await apiJson(
+        `/api/inventory/categories/${deleteCategoryTarget.id}`,
+        "DELETE"
+      );
+      toast.success("Category deleted");
+      router.refresh();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setDeleteCategoryTarget(null);
     }
-    toast.success("Category deleted");
-    router.refresh();
+  }
+
+  async function handleDeactivate() {
+    if (!deactivateTarget) return;
+    try {
+      await apiJson(`/api/inventory/${deactivateTarget.id}`, "PATCH", {
+        isActive: false,
+      });
+      toast.success("Item deactivated");
+      router.refresh();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setDeactivateTarget(null);
+    }
   }
 
   async function openReport() {
     setReportOpen(true);
     setLoadingReport(true);
+    if (reportPdfUrl) URL.revokeObjectURL(reportPdfUrl);
     setReportPdfUrl(null);
-    setReportPdfBlob(null);
     try {
-      const res = await fetch("/api/inventory/report");
-      if (!res.ok) {
-        toast.error("Failed to generate report");
-        setReportOpen(false);
-        return;
-      }
-      const blob = await res.blob();
-      setReportPdfBlob(blob);
+      const blob = await apiFetch<Blob>("/api/inventory/report");
       setReportPdfUrl(URL.createObjectURL(blob));
+    } catch (err) {
+      toast.error(errorMessage(err));
+      setReportOpen(false);
     } finally {
       setLoadingReport(false);
     }
   }
 
-  function handleCloseReport(open: boolean) {
+  function closeReport(open: boolean) {
     if (!open && reportPdfUrl) {
       URL.revokeObjectURL(reportPdfUrl);
       setReportPdfUrl(null);
-      setReportPdfBlob(null);
     }
     setReportOpen(open);
-
   }
 
-  function handleLocalDownload() {
+  function downloadReport() {
     if (!reportPdfUrl) return;
-    const dateStr = new Date().toISOString().split("T")[0];
-    const a = document.createElement("a");
-    a.href = reportPdfUrl;
-    a.download = `inventory-report-${dateStr}.pdf`;
-    a.click();
-
+    const link = document.createElement("a");
+    link.href = reportPdfUrl;
+    link.download = `inventory-report-${today}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
     toast.success("Report downloaded");
   }
 
-  async function handleDriveUpload() {
+  async function uploadToDrive() {
+    if (uploadingToDrive) return;
     setUploadingToDrive(true);
-
     try {
-      const res = await fetch("/api/inventory/report/drive", { method: "POST" });
-      if (!res.ok) {
-        const err = await res.json();
-        toast.error(err.error || "Failed to upload to Google Drive");
-        return;
-      }
-      const data = await res.json();
+      // The server regenerates the PDF from the database; no body is sent.
+      // This endpoint previously read the PDF from the request body while the
+      // browser sent none, so it failed every time.
+      const data = await apiJson<{ name: string; link?: string }>(
+        "/api/inventory/report/drive",
+        "POST"
+      );
       toast.success(`Uploaded to Google Drive: ${data.name}`, {
-        action: data.link ? { label: "Open", onClick: () => window.open(data.link, "_blank") } : undefined,
+        action: data.link
+          ? {
+              label: "Open",
+              onClick: () => window.open(data.link, "_blank", "noopener"),
+            }
+          : undefined,
       });
+    } catch (err) {
+      toast.error(errorMessage(err));
     } finally {
       setUploadingToDrive(false);
     }
   }
 
-  const actionColor: Record<string, string> = {
-    PURCHASED: "bg-green-100 text-green-800",
-    USED: "bg-blue-100 text-blue-800",
-    BROKEN: "bg-red-100 text-red-800",
-  };
+  const hasFilters =
+    categoryFilter !== "all" || stockFilter !== "all" || search.trim() !== "";
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Inventory</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="mt-1 text-sm text-muted-foreground">
             Manage school inventory items and stock levels
           </p>
         </div>
-        <div className="flex gap-2">
-          {isAdmin && (
+        <div className="flex flex-wrap gap-2">
+          {canDownloadReport && (
             <Button variant="outline" onClick={openReport} className="gap-2">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
               Generate Report
@@ -334,18 +481,52 @@ export default function InventoryClient({ items, categories, role }: Props) {
         </div>
       </div>
 
-      <Card className="border-0 shadow-sm ring-1 ring-black/5">
-        <div className="flex items-center gap-3 border-b px-4 py-3">
-          <span className="text-sm font-medium text-gray-700">Category:</span>
+      <div className="grid grid-cols-3 gap-4">
+        <Card className="border-0 p-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Items
+          </p>
+          <p className="mt-1 text-2xl font-bold">{items.length}</p>
+        </Card>
+        <Card className="border-0 p-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Low stock
+          </p>
+          <p className="mt-1 text-2xl font-bold text-amber-600 dark:text-amber-400">
+            {lowStock}
+          </p>
+        </Card>
+        <Card className="border-0 p-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Out of stock
+          </p>
+          <p className="mt-1 text-2xl font-bold text-red-600 dark:text-red-400">
+            {outOfStock}
+          </p>
+        </Card>
+      </div>
+
+      <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+        <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
+          <div className="relative min-w-56 flex-1">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name or code"
+              className="h-9 pl-9"
+              aria-label="Search inventory"
+            />
+          </div>
           <Select
             value={categoryFilter}
             onValueChange={(v) => v && setCategoryFilter(v)}
           >
-            <SelectTrigger className="w-48">
+            <SelectTrigger className="h-9 w-48">
               <SelectValue placeholder="All Categories">
                 {categoryFilter === "all"
                   ? "All Categories"
-                  : categories.find((c) => c.id === categoryFilter)?.name ?? "All Categories"}
+                  : categories.find((c) => c.id === categoryFilter)?.name}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -357,110 +538,158 @@ export default function InventoryClient({ items, categories, role }: Props) {
               ))}
             </SelectContent>
           </Select>
+          <Select value={stockFilter} onValueChange={(v) => v && setStockFilter(v)}>
+            <SelectTrigger className="h-9 w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All stock</SelectItem>
+              <SelectItem value="low">Low stock</SelectItem>
+              <SelectItem value="out">Out of stock</SelectItem>
+            </SelectContent>
+          </Select>
+          {hasFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSearch("");
+                setCategoryFilter("all");
+                setStockFilter("all");
+              }}
+            >
+              Clear
+            </Button>
+          )}
         </div>
 
         {filteredItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 text-gray-400">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
             </div>
-            <p className="mt-4 text-sm font-medium text-gray-900">No items found</p>
-            <p className="mt-1 text-sm text-muted-foreground">Add your first inventory item to get started.</p>
+            <p className="mt-4 text-sm font-medium">
+              {hasFilters ? "No items match these filters" : "No items yet"}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {hasFilters
+                ? "Try a different search or filter."
+                : "Add your first inventory item to get started."}
+            </p>
           </div>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Code</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead className="text-right">Stock</TableHead>
-                <TableHead>Unit</TableHead>
-                <TableHead>Last Updated</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredItems.map((item) => (
-                <TableRow
-                  key={item.id}
-                  className={
-                    item.quantityAvailable <= 0
-                      ? "bg-red-50/50"
-                      : item.quantityAvailable <= 5
-                      ? "bg-amber-50/50"
-                      : ""
-                  }
-                >
-                  <TableCell className="font-mono text-xs font-medium">
-                    {item.code}
-                  </TableCell>
-                  <TableCell>
-                    <button
-                      onClick={() => openHistory(item)}
-                      className="text-left font-medium text-primary hover:underline"
-                    >
-                      {item.name}
-                    </button>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="font-normal">
-                      {item.category.name}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <span
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="pl-4">Code</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead className="hidden sm:table-cell">Category</TableHead>
+                  <TableHead className="text-right">Stock</TableHead>
+                  <TableHead className="hidden md:table-cell">Unit</TableHead>
+                  <TableHead className="hidden lg:table-cell">Updated</TableHead>
+                  <TableHead className="pr-4 text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredItems.map((item) => {
+                  const out = item.quantityAvailable <= 0;
+                  const low =
+                    !out && item.quantityAvailable <= LOW_STOCK_THRESHOLD;
+                  return (
+                    <TableRow
+                      key={item.id}
                       className={
-                        item.quantityAvailable <= 0
-                          ? "font-bold text-red-600"
-                          : item.quantityAvailable <= 5
-                          ? "font-semibold text-amber-600"
-                          : "font-medium"
+                        out
+                          ? "bg-red-50/50 dark:bg-red-950/20"
+                          : low
+                            ? "bg-amber-50/50 dark:bg-amber-950/20"
+                            : ""
                       }
                     >
-                      {item.quantityAvailable}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {item.unit}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-xs">
-                    {new Date(item.updatedAt).toLocaleDateString()}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => openLogDialog(item.id)}
-                      >
-                        Log
-                      </Button>
-                      {isAdmin && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                          onClick={() => handleDeactivate(item.id)}
+                      <TableCell className="pl-4 font-mono text-xs font-medium">
+                        {item.code}
+                      </TableCell>
+                      <TableCell>
+                        <button
+                          onClick={() => loadHistory(item)}
+                          className="text-left font-medium text-primary hover:underline"
                         >
-                          Deactivate
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                          {item.name}
+                        </button>
+                        <p className="text-xs text-muted-foreground sm:hidden">
+                          {item.category.name}
+                        </p>
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell">
+                        <Badge variant="secondary" className="font-normal">
+                          {item.category.name}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span
+                          className={
+                            out
+                              ? "font-bold text-red-600 dark:text-red-400"
+                              : low
+                                ? "font-semibold text-amber-600 dark:text-amber-400"
+                                : "font-medium"
+                          }
+                        >
+                          {item.quantityAvailable}
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden text-muted-foreground md:table-cell">
+                        {item.unit}
+                      </TableCell>
+                      <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
+                        {formatDate(item.updatedAt)}
+                      </TableCell>
+                      <TableCell className="pr-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openLogDialog(item)}
+                          >
+                            Log
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEdit(item)}
+                          >
+                            Edit
+                          </Button>
+                          {isAdmin && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-red-600 hover:text-red-700"
+                              onClick={() => setDeactivateTarget(item)}
+                            >
+                              Deactivate
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </Card>
 
-      {/* Add Item Dialog */}
+      {/* Add item */}
       <Dialog open={addItemOpen} onOpenChange={setAddItemOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Add Inventory Item</DialogTitle>
-            <DialogDescription>Add a new item to track in inventory.</DialogDescription>
+            <DialogDescription>
+              Add a new item to track in inventory.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
@@ -468,27 +697,123 @@ export default function InventoryClient({ items, categories, role }: Props) {
               <Input
                 id="code"
                 placeholder="e.g. LAB-MICRO-001"
-                value={newCode}
-                onChange={(e) => setNewCode(e.target.value)}
+                maxLength={LIMITS.itemCode}
+                value={newItem.code}
+                onChange={(e) =>
+                  setNewItem({ ...newItem, code: e.target.value })
+                }
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
+              <Label htmlFor="itemName">Name</Label>
               <Input
-                id="name"
+                id="itemName"
                 placeholder="e.g. Microscope"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
+                maxLength={LIMITS.itemName}
+                value={newItem.name}
+                onChange={(e) =>
+                  setNewItem({ ...newItem, name: e.target.value })
+                }
               />
             </div>
             <div className="space-y-2">
               <Label>Category</Label>
-              <Select value={newCategory} onValueChange={(v) => v && setNewCategory(v)}>
+              <Select
+                value={newItem.categoryId}
+                onValueChange={(v) =>
+                  v && setNewItem({ ...newItem, categoryId: v })
+                }
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select category">
-                    {newCategory
-                      ? categories.find((c) => c.id === newCategory)?.name ?? "Select category"
-                      : "Select category"}
+                    {categories.find((c) => c.id === newItem.categoryId)?.name ??
+                      "Select category"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {categories.length === 0 && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Create a category first.
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="unit">Unit</Label>
+              <Input
+                id="unit"
+                placeholder="e.g. pieces, boxes, litres"
+                maxLength={LIMITS.unit}
+                value={newItem.unit}
+                onChange={(e) =>
+                  setNewItem({ ...newItem, unit: e.target.value })
+                }
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddItemOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddItem} disabled={addingItem}>
+              {addingItem ? "Adding..." : "Add Item"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit item */}
+      <Dialog
+        open={editItem !== null}
+        onOpenChange={(open) => !open && setEditItem(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit {editItem?.name}</DialogTitle>
+            <DialogDescription>
+              Correct an item&apos;s details. Stock history is unaffected.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="editCode">Item Code</Label>
+              <Input
+                id="editCode"
+                maxLength={LIMITS.itemCode}
+                value={editDraft.code}
+                onChange={(e) =>
+                  setEditDraft({ ...editDraft, code: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="editItemName">Name</Label>
+              <Input
+                id="editItemName"
+                maxLength={LIMITS.itemName}
+                value={editDraft.name}
+                onChange={(e) =>
+                  setEditDraft({ ...editDraft, name: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <Select
+                value={editDraft.categoryId}
+                onValueChange={(v) =>
+                  v && setEditDraft({ ...editDraft, categoryId: v })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue>
+                    {categories.find((c) => c.id === editDraft.categoryId)?.name}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -501,32 +826,38 @@ export default function InventoryClient({ items, categories, role }: Props) {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="unit">Unit</Label>
+              <Label htmlFor="editUnit">Unit</Label>
               <Input
-                id="unit"
-                placeholder="e.g. pieces, boxes, sets"
-                value={newUnit}
-                onChange={(e) => setNewUnit(e.target.value)}
+                id="editUnit"
+                maxLength={LIMITS.unit}
+                value={editDraft.unit}
+                onChange={(e) =>
+                  setEditDraft({ ...editDraft, unit: e.target.value })
+                }
               />
             </div>
           </div>
           <DialogFooter>
-            <Button
-              onClick={handleAddItem}
-              disabled={addingItem || !newCode || !newName || !newCategory || !newUnit}
-            >
-              {addingItem ? "Adding..." : "Add Item"}
+            <Button variant="outline" onClick={() => setEditItem(null)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEdit} disabled={savingEdit}>
+              {savingEdit ? "Saving..." : "Save changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Log Dialog */}
+      {/* Log stock movement */}
       <Dialog open={logOpen} onOpenChange={setLogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Log Inventory Entry</DialogTitle>
-            <DialogDescription>Record a purchase, usage, or breakage.</DialogDescription>
+            <DialogTitle>Log Stock Movement</DialogTitle>
+            <DialogDescription>
+              {logItem
+                ? `${logItem.name} — ${logItem.quantityAvailable} ${logItem.unit} in stock`
+                : ""}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
@@ -536,9 +867,11 @@ export default function InventoryClient({ items, categories, role }: Props) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="PURCHASED">Purchased</SelectItem>
-                  <SelectItem value="USED">Used</SelectItem>
-                  <SelectItem value="BROKEN">Broken</SelectItem>
+                  {INVENTORY_ACTIONS.map((action) => (
+                    <SelectItem key={action} value={action}>
+                      {action.charAt(0) + action.slice(1).toLowerCase()}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -547,217 +880,305 @@ export default function InventoryClient({ items, categories, role }: Props) {
               <Input
                 id="quantity"
                 type="number"
-                min="1"
-                placeholder="Enter quantity"
+                min={1}
+                step={1}
+                max={
+                  logAction !== "PURCHASED" && logItem
+                    ? logItem.quantityAvailable
+                    : undefined
+                }
                 value={logQuantity}
                 onChange={(e) => setLogQuantity(e.target.value)}
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="details">Details</Label>
-              <Textarea
-                id="details"
-                placeholder="What was purchased, why it was used, how it broke..."
-                value={logDetails}
-                onChange={(e) => setLogDetails(e.target.value)}
-                rows={3}
-              />
+              {logAction !== "PURCHASED" && logItem && (
+                <p className="text-xs text-muted-foreground">
+                  At most {logItem.quantityAvailable} {logItem.unit} available.
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="logDate">Date</Label>
               <Input
                 id="logDate"
                 type="date"
+                max={today}
                 value={logDate}
                 onChange={(e) => setLogDate(e.target.value)}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="details">Details</Label>
+              <Textarea
+                id="details"
+                rows={3}
+                maxLength={LIMITS.logDetails}
+                placeholder="e.g. Purchased from ABC Suppliers, invoice #123"
+                value={logDetails}
+                onChange={(e) => setLogDetails(e.target.value)}
+              />
+            </div>
           </div>
           <DialogFooter>
-            <Button
-              onClick={handleSubmitLog}
-              disabled={submittingLog || !logQuantity || !logDetails || !logDate}
-            >
-              {submittingLog ? "Submitting..." : "Submit"}
+            <Button variant="outline" onClick={() => setLogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmitLog} disabled={submittingLog}>
+              {submittingLog ? "Saving..." : "Save entry"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Item History Dialog */}
+      {/* History */}
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>
-              {historyItem?.name}{" "}
-              <span className="text-xs font-mono text-muted-foreground">
-                ({historyItem?.code})
-              </span>
-            </DialogTitle>
+            <DialogTitle>{historyItem?.name} — Stock History</DialogTitle>
             <DialogDescription>
-              Stock: {historyItem?.quantityAvailable} {historyItem?.unit}
+              {historyItem
+                ? `${historyItem.quantityAvailable} ${historyItem.unit} currently in stock`
+                : ""}
             </DialogDescription>
           </DialogHeader>
+
+          {isAdmin && (
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={showVoided}
+                onChange={(e) => {
+                  setShowVoided(e.target.checked);
+                  if (historyItem) loadHistory(historyItem, e.target.checked);
+                }}
+                className="h-4 w-4 accent-primary"
+              />
+              Show voided entries
+            </label>
+          )}
+
           {loadingHistory ? (
-            <div className="space-y-3 py-4">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-10 animate-pulse rounded bg-gray-100" />
-              ))}
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              Loading history...
             </div>
           ) : historyLogs.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              No log entries yet.
-            </p>
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              No stock movements recorded yet.
+            </div>
           ) : (
-            <div className="max-h-80 overflow-y-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Action</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead>Details</TableHead>
-                    <TableHead>Logged By</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {historyLogs.map((log) => (
-                    <TableRow key={log.id}>
-                      <TableCell className="text-xs">
-                        {new Date(log.date).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                            actionColor[log.action] || ""
-                          }`}
-                        >
-                          {log.action}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {log.action === "PURCHASED" ? "+" : "-"}
-                        {log.quantity}
-                      </TableCell>
-                      <TableCell className="max-w-[200px] truncate text-sm">
-                        {log.details}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {log.loggedBy.name}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <div className="space-y-2">
+              {historyLogs.map((log) => (
+                <div
+                  key={log.id}
+                  className={`rounded-lg border px-3 py-2.5 ${
+                    log.voidedAt ? "opacity-60" : ""
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-xs font-semibold ${
+                        actionColor[log.action] ?? "bg-muted"
+                      }`}
+                    >
+                      {log.action}
+                    </span>
+                    <span className="text-sm font-medium">
+                      {log.action === "PURCHASED" ? "+" : "−"}
+                      {log.quantity}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatDate(log.date)}
+                    </span>
+                    {log.voidedAt && (
+                      <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950 dark:text-red-300">
+                        VOIDED
+                      </span>
+                    )}
+                    {isAdmin && !log.voidedAt && (
+                      <button
+                        onClick={() => {
+                          setVoidTarget(log);
+                          setVoidReason("");
+                        }}
+                        className="ml-auto text-xs font-medium text-muted-foreground hover:text-red-600 hover:underline"
+                      >
+                        Void
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-1 text-sm">{log.details}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Logged by {log.loggedBy.name}
+                  </p>
+                  {log.voidedAt && (
+                    <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                      Voided by {log.voidedBy?.name ?? "an admin"}
+                      {log.voidReason ? `: ${log.voidReason}` : ""}
+                    </p>
+                  )}
+                </div>
+              ))}
             </div>
           )}
-          <DialogFooter showCloseButton />
         </DialogContent>
       </Dialog>
 
-      {/* Category Management Dialog */}
+      {/* Void a log entry */}
+      <Dialog
+        open={voidTarget !== null}
+        onOpenChange={(open) => !open && setVoidTarget(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Void this stock entry?</DialogTitle>
+            <DialogDescription>
+              The entry stays on record but stops counting towards stock. This is
+              how a mistyped quantity gets corrected.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="voidReason">Reason</Label>
+            <Textarea
+              id="voidReason"
+              rows={3}
+              maxLength={LIMITS.logDetails}
+              placeholder="e.g. Quantity entered as 100 instead of 10"
+              value={voidReason}
+              onChange={(e) => setVoidReason(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVoidTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleVoid}
+              disabled={!voidReason.trim()}
+            >
+              Void entry
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Categories */}
       <Dialog open={categoriesOpen} onOpenChange={setCategoriesOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Manage Categories</DialogTitle>
-            <DialogDescription>Add{isAdmin ? " or delete" : ""} inventory categories.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="flex gap-2">
-              <Input
-                placeholder="New category name"
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddCategory()}
-              />
-              <Button
-                onClick={handleAddCategory}
-                disabled={addingCategory || !newCategoryName.trim()}
-                size="sm"
-              >
-                Add
-              </Button>
-            </div>
-            <div className="max-h-60 overflow-y-auto space-y-1">
-              {categories.map((c) => (
+          <div className="flex gap-2">
+            <Input
+              placeholder="New category name"
+              maxLength={LIMITS.categoryName}
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleAddCategory();
+              }}
+            />
+            <Button
+              onClick={handleAddCategory}
+              disabled={addingCategory || !newCategoryName.trim()}
+            >
+              Add
+            </Button>
+          </div>
+          <div className="max-h-72 space-y-1.5 overflow-y-auto">
+            {categories.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No categories yet.
+              </p>
+            ) : (
+              categories.map((category) => (
                 <div
-                  key={c.id}
-                  className="flex items-center justify-between rounded-md px-3 py-2 hover:bg-gray-50"
+                  key={category.id}
+                  className="flex items-center justify-between rounded-lg border px-3 py-2"
                 >
                   <div>
-                    <span className="text-sm font-medium">{c.name}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      ({c._count.items} items)
-                    </span>
+                    <p className="text-sm font-medium">{category.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {category._count.items} item
+                      {category._count.items === 1 ? "" : "s"}
+                    </p>
                   </div>
-                  {isAdmin && c._count.items === 0 && (
+                  {isAdmin && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="text-red-600 hover:text-red-700 hover:bg-red-50 h-7 px-2"
-                      onClick={() => handleDeleteCategory(c.id)}
+                      className="text-red-600 hover:text-red-700"
+                      disabled={category._count.items > 0}
+                      title={
+                        category._count.items > 0
+                          ? "Move or deactivate its items first"
+                          : undefined
+                      }
+                      onClick={() => setDeleteCategoryTarget(category)}
                     >
                       Delete
                     </Button>
                   )}
                 </div>
-              ))}
-            </div>
+              ))
+            )}
           </div>
-          <DialogFooter showCloseButton />
         </DialogContent>
       </Dialog>
 
-      {/* Inventory Report Dialog */}
-      <Dialog open={reportOpen} onOpenChange={handleCloseReport}>
-        <DialogContent className="sm:max-w-4xl h-[85vh] flex flex-col">
+      {/* Report preview */}
+      <Dialog open={reportOpen} onOpenChange={closeReport}>
+        <DialogContent className="max-h-[90vh] sm:max-w-4xl">
           <DialogHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <DialogTitle>Inventory Report</DialogTitle>
-                <DialogDescription>Usage and trend summary for all inventory items.</DialogDescription>
-              </div>
-              {reportPdfUrl && (
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2"
-                    onClick={handleLocalDownload}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                    Save to device
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2"
-                    onClick={handleDriveUpload}
-                    disabled={uploadingToDrive}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
-                    {uploadingToDrive ? "Uploading..." : "Save to Drive"}
-                  </Button>
-                </div>
-              )}
-            </div>
+            <DialogTitle>Inventory Report</DialogTitle>
+            <DialogDescription>
+              Generated from current stock records.
+            </DialogDescription>
           </DialogHeader>
           {loadingReport ? (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center space-y-3">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-primary mx-auto" />
-                <p className="text-sm text-muted-foreground">Generating report...</p>
-              </div>
+            <div className="py-24 text-center text-sm text-muted-foreground">
+              Generating report...
             </div>
           ) : reportPdfUrl ? (
             <iframe
               src={reportPdfUrl}
-              className="flex-1 w-full rounded-md border"
-              title="Inventory Report PDF"
+              title="Inventory report preview"
+              className="h-[60vh] w-full rounded-lg border"
             />
           ) : null}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={downloadReport}
+              disabled={!reportPdfUrl}
+            >
+              Download PDF
+            </Button>
+            <Button onClick={uploadToDrive} disabled={uploadingToDrive}>
+              {uploadingToDrive ? "Uploading..." : "Save to Google Drive"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={deactivateTarget !== null}
+        onOpenChange={(open) => !open && setDeactivateTarget(null)}
+        title={`Deactivate ${deactivateTarget?.name}?`}
+        description="The item is hidden from stock views and no new movements can be logged against it. Its history is preserved."
+        confirmLabel="Deactivate"
+        destructive
+        onConfirm={handleDeactivate}
+      />
+
+      <ConfirmDialog
+        open={deleteCategoryTarget !== null}
+        onOpenChange={(open) => !open && setDeleteCategoryTarget(null)}
+        title={`Delete category "${deleteCategoryTarget?.name}"?`}
+        description="This cannot be undone."
+        confirmLabel="Delete category"
+        destructive
+        onConfirm={handleDeleteCategory}
+      />
     </div>
   );
 }

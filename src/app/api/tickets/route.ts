@@ -1,121 +1,100 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
-import { getTicketWhereClause } from "@/lib/permissions";
 import { z } from "zod";
+import { prisma } from "@/lib/prisma";
+import { handler, requireSession, parseBody, badRequest, json } from "@/lib/api";
+import { notify } from "@/lib/notify";
+import { endOfDayUTC, startOfDayUTC } from "@/lib/format";
+import {
+  CATEGORIES,
+  LIMITS,
+  SEVERITIES,
+  parsePagination,
+  trimmedString,
+  dateOnlyString,
+} from "@/lib/validation";
+import {
+  ticketListSelect,
+  buildTicketFilter,
+  buildTicketOrderBy,
+} from "@/lib/ticket-query";
 
 const createTicketSchema = z.object({
-  title: z.string().min(1),
-  description: z.string().min(1),
-  category: z.enum([
-    "ACADEMICS",
-    "PARENT_ISSUES",
-    "STUDENT_ISSUES",
-    "FACILITIES_ISSUES",
-    "STAFF_ISSUES",
-    "SECURITY",
-    "TRANSPORT",
-    "MISCELLANEOUS",
-  ]),
-  severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
-  managerId: z.string().optional(),
-  dateOfOccurrence: z.string().optional(),
-  deadline: z.string().optional(),
+  title: trimmedString(LIMITS.title, "Title"),
+  description: trimmedString(LIMITS.description, "Description"),
+  category: z.enum(CATEGORIES),
+  severity: z.enum(SEVERITIES).optional(),
+  managerId: z.string().min(1).optional(),
+  dateOfOccurrence: dateOnlyString.optional(),
+  deadline: dateOnlyString.optional(),
 });
 
-export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export const GET = handler(async (req: NextRequest) => {
+  const user = await requireSession();
+  const params = req.nextUrl.searchParams;
 
-  const { searchParams } = new URL(req.url);
-  const status = searchParams.get("status");
-  const category = searchParams.get("category");
-  const severity = searchParams.get("severity");
-  const page = parseInt(searchParams.get("page") || "1");
-  const limit = parseInt(searchParams.get("limit") || "20");
-  const sort = searchParams.get("sort") || "createdAt";
-  const order = searchParams.get("order") || "desc";
-
-  const where: Record<string, unknown> = getTicketWhereClause(
-    session.user.role,
-    session.user.id
-  );
-
-  if (status) where.status = status;
-  if (category) where.category = category;
-  if (severity) where.severity = severity;
-
-  const orderBy =
-    sort === "severity_deadline"
-      ? [{ severity: "desc" as const }, { deadline: "asc" as const }]
-      : { [sort]: order };
+  const where = buildTicketFilter(params, user.role, user.id);
+  const { page, limit, skip } = parsePagination(params);
 
   const [tickets, total] = await Promise.all([
     prisma.ticket.findMany({
       where,
-      select: {
-        id: true,
-        ticketNumber: true,
-        title: true,
-        category: true,
-        severity: true,
-        status: true,
-        deadline: true,
-        createdAt: true,
-        updatedAt: true,
-        creator: { select: { id: true, name: true } },
-        manager: { select: { id: true, name: true } },
-      },
-      orderBy,
-      skip: (page - 1) * limit,
+      select: ticketListSelect,
+      orderBy: buildTicketOrderBy(params),
+      skip,
       take: limit,
     }),
     prisma.ticket.count({ where }),
   ]);
 
-  return NextResponse.json({ tickets, total, page, limit }, {
-    headers: { "Cache-Control": "private, max-age=5, stale-while-revalidate=15" },
-  });
-}
+  return json(
+    { tickets, total, page, limit, totalPages: Math.ceil(total / limit) },
+    {
+      headers: {
+        "Cache-Control": "private, max-age=5, stale-while-revalidate=15",
+      },
+    }
+  );
+});
 
-export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export const POST = handler(async (req: NextRequest) => {
+  const user = await requireSession();
+  const data = await parseBody(req, createTicketSchema);
+
+  // Reject a manager id that does not resolve to an active user, rather than
+  // letting it surface as a foreign-key 500.
+  if (data.managerId) {
+    const manager = await prisma.user.findFirst({
+      where: { id: data.managerId, isActive: true },
+      select: { id: true },
+    });
+    if (!manager) {
+      throw badRequest("The selected assignee is not an active user.");
+    }
   }
 
-  const body = await req.json();
-  const parsed = createTicketSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.flatten().fieldErrors },
-      { status: 400 }
-    );
+  if (data.dateOfOccurrence) {
+    const occurred = startOfDayUTC(data.dateOfOccurrence);
+    if (occurred.getTime() > Date.now()) {
+      throw badRequest("The date of occurrence cannot be in the future.");
+    }
   }
 
   const ticket = await prisma.$transaction(async (tx) => {
     const created = await tx.ticket.create({
       data: {
-        title: parsed.data.title,
-        description: parsed.data.description,
-        category: parsed.data.category,
-        severity: parsed.data.severity || "MEDIUM",
-        creatorId: session.user.id,
-        managerId: parsed.data.managerId || null,
-        dateOfOccurrence: parsed.data.dateOfOccurrence
-          ? new Date(parsed.data.dateOfOccurrence)
+        title: data.title,
+        description: data.description,
+        category: data.category,
+        severity: data.severity ?? "MEDIUM",
+        creatorId: user.id,
+        managerId: data.managerId ?? null,
+        dateOfOccurrence: data.dateOfOccurrence
+          ? startOfDayUTC(data.dateOfOccurrence)
           : null,
-        deadline: parsed.data.deadline
-          ? new Date(parsed.data.deadline)
-          : null,
+        // Deadlines are end-of-day so "due today" is not instantly overdue.
+        deadline: data.deadline ? endOfDayUTC(data.deadline) : null,
       },
-      include: {
-        creator: { select: { id: true, name: true } },
-        manager: { select: { id: true, name: true } },
-      },
+      select: { ...ticketListSelect, description: true },
     });
 
     await tx.ticketEvent.create({
@@ -123,22 +102,19 @@ export async function POST(req: NextRequest) {
         type: "CREATED",
         newValue: `Ticket #${created.ticketNumber} created`,
         ticketId: created.id,
-        userId: session.user.id,
+        userId: user.id,
       },
     });
 
-    if (created.managerId && created.managerId !== session.user.id) {
-      await tx.notification.create({
-        data: {
-          message: `You have been assigned ticket #${created.ticketNumber}: ${created.title}`,
-          link: `/tickets/${created.id}`,
-          userId: created.managerId,
-        },
-      });
-    }
+    await notify(tx, {
+      recipientIds: [created.manager?.id],
+      actorId: user.id,
+      message: `You have been assigned ticket #${created.ticketNumber}: ${created.title}`,
+      link: `/tickets/${created.id}`,
+    });
 
     return created;
   });
 
   return NextResponse.json(ticket, { status: 201 });
-}
+});

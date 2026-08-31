@@ -1,112 +1,91 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { canViewTicket } from "@/lib/permissions";
-import { z } from "zod";
+import {
+  handler,
+  requireSession,
+  parseBody,
+  forbidden,
+  notFound,
+  json,
+} from "@/lib/api";
+import { notify } from "@/lib/notify";
+import { LIMITS, trimmedString } from "@/lib/validation";
+import { commentSelect } from "@/lib/ticket-query";
 
 const commentSchema = z.object({
-  body: z.string().min(1),
+  body: trimmedString(LIMITS.comment, "Comment"),
 });
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export const GET = handler(
+  async (_req: NextRequest, ctx: { params: Promise<{ id: string }> }) => {
+    const user = await requireSession();
+    const { id } = await ctx.params;
 
-  const { id } = await params;
-  const ticket = await prisma.ticket.findUnique({ where: { id } });
-  if (!ticket) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
-  if (!canViewTicket(session.user.role, session.user.id, ticket)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  const comments = await prisma.comment.findMany({
-    where: { ticketId: id },
-    include: { author: { select: { id: true, name: true } } },
-    orderBy: { createdAt: "asc" },
-  });
-
-  return NextResponse.json(comments);
-}
-
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { id } = await params;
-  const ticket = await prisma.ticket.findUnique({ where: { id } });
-  if (!ticket) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
-  if (!canViewTicket(session.user.role, session.user.id, ticket)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  if (ticket.status === "ACKNOWLEDGED" && session.user.role !== "ADMIN") {
-    return NextResponse.json(
-      { error: "Only admins can comment on acknowledged tickets" },
-      { status: 403 }
-    );
-  }
-
-  const body = await req.json();
-  const parsed = commentSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.flatten().fieldErrors },
-      { status: 400 }
-    );
-  }
-
-  const comment = await prisma.$transaction(async (tx) => {
-    const created = await tx.comment.create({
-      data: {
-        body: parsed.data.body,
-        ticketId: id,
-        authorId: session.user.id,
-      },
-      include: { author: { select: { id: true, name: true } } },
+    const ticket = await prisma.ticket.findUnique({
+      where: { id },
+      select: { id: true, creatorId: true, managerId: true },
     });
-
-    await tx.ticketEvent.create({
-      data: {
-        type: "COMMENT",
-        newValue: parsed.data.body.slice(0, 100),
-        ticketId: id,
-        userId: session.user.id,
-      },
-    });
-
-    const notifyUserIds = [ticket.creatorId, ticket.managerId].filter(
-      (uid): uid is string => !!uid && uid !== session.user.id
-    );
-
-    if (notifyUserIds.length > 0) {
-      await tx.notification.createMany({
-        data: notifyUserIds.map((userId) => ({
-          message: `New comment on ticket #${ticket.ticketNumber} by ${session.user.name}`,
-          link: `/tickets/${ticket.id}`,
-          userId,
-        })),
-      });
+    if (!ticket) throw notFound("That ticket does not exist.");
+    if (!canViewTicket(user.role, user.id, ticket)) {
+      throw forbidden("You do not have access to this ticket.");
     }
 
-    return created;
-  });
+    const comments = await prisma.comment.findMany({
+      where: { ticketId: id, deletedAt: null },
+      select: commentSelect,
+      orderBy: { createdAt: "asc" },
+    });
 
-  return NextResponse.json(comment, { status: 201 });
-}
+    return json(comments);
+  }
+);
+
+export const POST = handler(
+  async (req: NextRequest, ctx: { params: Promise<{ id: string }> }) => {
+    const user = await requireSession();
+    const { id } = await ctx.params;
+
+    const ticket = await prisma.ticket.findUnique({ where: { id } });
+    if (!ticket) throw notFound("That ticket does not exist.");
+    if (!canViewTicket(user.role, user.id, ticket)) {
+      throw forbidden("You do not have access to this ticket.");
+    }
+
+    if (ticket.status === "ACKNOWLEDGED" && user.role !== "ADMIN") {
+      throw forbidden(
+        "This ticket has been acknowledged; only admins can add comments."
+      );
+    }
+
+    const data = await parseBody(req, commentSchema);
+
+    const comment = await prisma.$transaction(async (tx) => {
+      const created = await tx.comment.create({
+        data: { body: data.body, ticketId: id, authorId: user.id },
+        select: commentSelect,
+      });
+
+      await tx.ticketEvent.create({
+        data: {
+          type: "COMMENT",
+          newValue: data.body.slice(0, 100),
+          ticketId: id,
+          userId: user.id,
+        },
+      });
+
+      await notify(tx, {
+        recipientIds: [ticket.creatorId, ticket.managerId],
+        actorId: user.id,
+        message: `New comment on ticket #${ticket.ticketNumber} by ${user.name}`,
+        link: `/tickets/${ticket.id}`,
+      });
+
+      return created;
+    });
+
+    return NextResponse.json(comment, { status: 201 });
+  }
+);

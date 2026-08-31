@@ -1,94 +1,97 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { NextRequest } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { canReassignTicket } from "@/lib/permissions";
-import { z } from "zod";
+import {
+  handler,
+  requireSession,
+  parseBody,
+  badRequest,
+  forbidden,
+  notFound,
+  json,
+} from "@/lib/api";
+import { notify } from "@/lib/notify";
 
 const reassignSchema = z.object({
-  managerId: z.string().min(1),
+  managerId: z.string().min(1, "Choose someone to assign this to."),
 });
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export const PATCH = handler(
+  async (req: NextRequest, ctx: { params: Promise<{ id: string }> }) => {
+    const user = await requireSession();
+    const { id } = await ctx.params;
 
-  const { id } = await params;
-  const ticket = await prisma.ticket.findUnique({
-    where: { id },
-    include: { manager: { select: { name: true } } },
-  });
-
-  if (!ticket) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
-  if (ticket.status === "ACKNOWLEDGED") {
-    return NextResponse.json(
-      { error: "Acknowledged tickets cannot be modified" },
-      { status: 403 }
-    );
-  }
-
-  if (!canReassignTicket(session.user.role, session.user.id, ticket)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  const body = await req.json();
-  const parsed = reassignSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.flatten().fieldErrors },
-      { status: 400 }
-    );
-  }
-
-  const newManager = await prisma.user.findUnique({
-    where: { id: parsed.data.managerId },
-    select: { id: true, name: true },
-  });
-
-  if (!newManager) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
-  const updated = await prisma.$transaction(async (tx) => {
-    const result = await tx.ticket.update({
+    const ticket = await prisma.ticket.findUnique({
       where: { id },
-      data: { managerId: parsed.data.managerId },
-      include: {
-        creator: { select: { id: true, name: true } },
-        manager: { select: { id: true, name: true } },
-      },
+      include: { manager: { select: { id: true, name: true } } },
     });
 
-    await tx.ticketEvent.create({
-      data: {
-        type: "REASSIGNED",
-        oldValue: ticket.manager?.name || "Unassigned",
-        newValue: newManager.name,
-        ticketId: id,
-        userId: session.user.id,
-      },
-    });
+    if (!ticket) throw notFound("That ticket does not exist.");
 
-    if (newManager.id !== session.user.id) {
-      await tx.notification.create({
-        data: {
-          message: `You have been assigned ticket #${ticket.ticketNumber}: ${ticket.title}`,
-          link: `/tickets/${ticket.id}`,
-          userId: newManager.id,
-        },
-      });
+    if (ticket.status === "ACKNOWLEDGED") {
+      throw forbidden(
+        "This ticket has been acknowledged and is locked from further changes."
+      );
     }
 
-    return result;
-  });
+    if (!canReassignTicket(user.role, user.id, ticket)) {
+      throw forbidden("You cannot reassign this ticket.");
+    }
 
-  return NextResponse.json(updated);
-}
+    const data = await parseBody(req, reassignSchema);
+
+    if (data.managerId === ticket.managerId) {
+      return json(ticket);
+    }
+
+    const newManager = await prisma.user.findFirst({
+      where: { id: data.managerId, isActive: true },
+      select: { id: true, name: true },
+    });
+
+    if (!newManager) {
+      throw badRequest("The selected assignee is not an active user.");
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.ticket.update({
+        where: { id },
+        data: { managerId: newManager.id },
+        include: {
+          creator: { select: { id: true, name: true } },
+          manager: { select: { id: true, name: true } },
+        },
+      });
+
+      await tx.ticketEvent.create({
+        data: {
+          type: "REASSIGNED",
+          oldValue: ticket.manager?.name ?? "Unassigned",
+          newValue: newManager.name,
+          ticketId: id,
+          userId: user.id,
+        },
+      });
+
+      await notify(tx, {
+        recipientIds: [newManager.id],
+        actorId: user.id,
+        message: `You have been assigned ticket #${ticket.ticketNumber}: ${ticket.title}`,
+        link: `/tickets/${ticket.id}`,
+      });
+
+      // The previous owner should know it left their queue.
+      await notify(tx, {
+        recipientIds: [ticket.managerId],
+        actorId: user.id,
+        message: `Ticket #${ticket.ticketNumber} was reassigned to ${newManager.name}`,
+        link: `/tickets/${ticket.id}`,
+      });
+
+      return result;
+    });
+
+    return json(updated);
+  }
+);

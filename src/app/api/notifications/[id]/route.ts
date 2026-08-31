@@ -1,30 +1,38 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { NextRequest } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { handler, requireSession, parseBody, notFound, json } from "@/lib/api";
 
-export async function PATCH(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+const patchSchema = z.object({ read: z.boolean().optional() });
 
-  const { id } = await params;
-  const notification = await prisma.notification.findUnique({
-    where: { id },
+type Ctx = { params: Promise<{ id: string }> };
+
+export const PATCH = handler(async (req: NextRequest, ctx: Ctx) => {
+  const user = await requireSession();
+  const { id } = await ctx.params;
+  const { read = true } = await parseBody(req, patchSchema);
+
+  // Scoping the update by userId means another user's notification id simply
+  // matches nothing, rather than being readable first and rejected after.
+  const result = await prisma.notification.updateMany({
+    where: { id, userId: user.id },
+    data: { read },
   });
 
-  if (!notification || notification.userId !== session.user.id) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
+  if (result.count === 0) throw notFound("That notification no longer exists.");
 
-  await prisma.notification.update({
-    where: { id },
-    data: { read: true },
+  return json({ success: true });
+});
+
+export const DELETE = handler(async (_req: NextRequest, ctx: Ctx) => {
+  const user = await requireSession();
+  const { id } = await ctx.params;
+
+  const result = await prisma.notification.deleteMany({
+    where: { id, userId: user.id },
   });
 
-  return NextResponse.json({ success: true });
-}
+  if (result.count === 0) throw notFound("That notification no longer exists.");
+
+  return json({ success: true });
+});

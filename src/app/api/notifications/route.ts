@@ -1,40 +1,65 @@
-import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { handler, requireSession, json } from "@/lib/api";
+import { parsePagination } from "@/lib/validation";
 
-export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export const GET = handler(async (req: NextRequest) => {
+  const user = await requireSession();
+  const params = req.nextUrl.searchParams;
+  const { page, limit, skip } = parsePagination(params, 20);
 
-  const [notifications, unreadCount] = await Promise.all([
+  const where = {
+    userId: user.id,
+    ...(params.get("unread") === "true" ? { read: false } : {}),
+  };
+
+  const [notifications, total, unreadCount] = await Promise.all([
     prisma.notification.findMany({
-      where: { userId: session.user.id },
+      where,
       orderBy: { createdAt: "desc" },
-      take: 20,
+      skip,
+      take: limit,
     }),
-    prisma.notification.count({
-      where: { userId: session.user.id, read: false },
-    }),
+    prisma.notification.count({ where }),
+    prisma.notification.count({ where: { userId: user.id, read: false } }),
   ]);
 
-  return NextResponse.json({ notifications, unreadCount }, {
-    headers: { "Cache-Control": "private, max-age=10, stale-while-revalidate=20" },
-  });
-}
+  return json(
+    {
+      notifications,
+      unreadCount,
+      total,
+      page,
+      limit,
+      hasMore: skip + notifications.length < total,
+    },
+    {
+      headers: {
+        "Cache-Control": "private, max-age=10, stale-while-revalidate=20",
+      },
+    }
+  );
+});
 
-export async function PATCH() {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+/** Marks every unread notification as read. */
+export const PATCH = handler(async () => {
+  const user = await requireSession();
 
-  await prisma.notification.updateMany({
-    where: { userId: session.user.id, read: false },
+  const result = await prisma.notification.updateMany({
+    where: { userId: user.id, read: false },
     data: { read: true },
   });
 
-  return NextResponse.json({ success: true });
-}
+  return json({ success: true, updated: result.count });
+});
+
+/** Clears read notifications so the list cannot grow without bound. */
+export const DELETE = handler(async () => {
+  const user = await requireSession();
+
+  const result = await prisma.notification.deleteMany({
+    where: { userId: user.id, read: true },
+  });
+
+  return json({ success: true, deleted: result.count });
+});

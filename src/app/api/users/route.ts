@@ -1,94 +1,135 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { z } from "zod";
+import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { canManageUsers } from "@/lib/permissions";
-import bcrypt from "bcryptjs";
-import { z } from "zod";
+import {
+  handler,
+  requireSession,
+  parseBody,
+  forbidden,
+  conflict,
+  json,
+} from "@/lib/api";
+import {
+  BCRYPT_ROUNDS,
+  LIMITS,
+  ROLES,
+  emailString,
+  passwordString,
+  parsePagination,
+  parseEnumParam,
+  parseSearch,
+  trimmedString,
+} from "@/lib/validation";
+import type { Prisma } from "@prisma/client";
 
 const createUserSchema = z.object({
-  name: z.string().min(1),
-  email: z.string().email(),
-  password: z.string().min(6),
-  role: z.enum([
-    "ADMIN",
-    "PRINCIPAL",
-    "ACADEMIC_HEAD",
-    "FACILITIES_MANAGER",
-    "OFFICE_MANAGER",
-    "STAFF",
-  ]),
+  name: trimmedString(LIMITS.name, "Name"),
+  email: emailString,
+  password: passwordString,
+  role: z.enum(ROLES),
 });
 
-export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export const GET = handler(async (req: NextRequest) => {
+  const user = await requireSession();
+  const params = req.nextUrl.searchParams;
 
-  const { searchParams } = new URL(req.url);
-  const minimal = searchParams.get("minimal") === "true";
-
-  // Any authenticated user can fetch a minimal user list (for reassign dropdowns)
-  if (minimal) {
+  // Any signed-in user may read a minimal directory, which is what populates
+  // the assignee dropdowns.
+  if (params.get("minimal") === "true") {
     const users = await prisma.user.findMany({
       where: { isActive: true },
       select: { id: true, name: true, role: true },
       orderBy: { name: "asc" },
     });
-    return NextResponse.json(users, {
-      headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=120" },
+    return json(users, {
+      headers: {
+        "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
+      },
     });
   }
 
-  // Full user list is admin-only
-  if (!canManageUsers(session.user.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!canManageUsers(user.role)) {
+    throw forbidden("Only admins can view the full user list.");
   }
 
-  const users = await prisma.user.findMany({
-    select: { id: true, name: true, email: true, role: true, isActive: true, createdAt: true },
-    orderBy: { createdAt: "desc" },
+  const where: Prisma.UserWhereInput = {};
+
+  const role = parseEnumParam(params.get("role"), ROLES, "role");
+  if (role) where.role = role;
+
+  const status = params.get("status");
+  if (status === "active") where.isActive = true;
+  if (status === "inactive") where.isActive = false;
+
+  const search = parseSearch(params.get("search"));
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: "insensitive" } },
+      { email: { contains: search, mode: "insensitive" } },
+    ];
+  }
+
+  const { page, limit, skip } = parsePagination(params, 25);
+
+  const [users, total, adminCount] = await Promise.all([
+    prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+        _count: {
+          select: { createdTickets: true, managedTickets: true },
+        },
+      },
+      orderBy: [{ isActive: "desc" }, { name: "asc" }],
+      skip,
+      take: limit,
+    }),
+    prisma.user.count({ where }),
+    prisma.user.count({ where: { role: "ADMIN", isActive: true } }),
+  ]);
+
+  return json({
+    users,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+    activeAdminCount: adminCount,
   });
+});
 
-  return NextResponse.json(users);
-}
-
-export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session || !canManageUsers(session.user.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+export const POST = handler(async (req: NextRequest) => {
+  const user = await requireSession();
+  if (!canManageUsers(user.role)) {
+    throw forbidden("Only admins can create users.");
   }
 
-  const body = await req.json();
-  const parsed = createUserSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.flatten().fieldErrors },
-      { status: 400 }
-    );
-  }
+  const data = await parseBody(req, createUserSchema);
 
+  // Emails are lowercased by the schema. Without that, "Admin@school.com"
+  // created a second account that could never sign in as "admin@school.com".
   const existing = await prisma.user.findUnique({
-    where: { email: parsed.data.email },
+    where: { email: data.email },
+    select: { id: true },
   });
-  if (existing) {
-    return NextResponse.json(
-      { error: "Email already in use" },
-      { status: 409 }
-    );
-  }
+  if (existing) throw conflict("That email address is already in use.");
 
-  const hashedPassword = await bcrypt.hash(parsed.data.password, 10);
-  const user = await prisma.user.create({
+  const created = await prisma.user.create({
     data: {
-      name: parsed.data.name,
-      email: parsed.data.email,
-      hashedPassword,
-      role: parsed.data.role,
+      name: data.name,
+      email: data.email,
+      hashedPassword: await bcrypt.hash(data.password, BCRYPT_ROUNDS),
+      role: data.role,
     },
-    select: { id: true, name: true, email: true, role: true },
+    select: { id: true, name: true, email: true, role: true, isActive: true },
   });
 
-  return NextResponse.json(user, { status: 201 });
-}
+  return NextResponse.json(created, { status: 201 });
+});

@@ -46,52 +46,57 @@ enum Status {
 enum EventType {
   CREATED
   STATUS_CHANGE
+  SEVERITY_CHANGE
+  DEADLINE_CHANGE
+  EDITED
   REASSIGNED
   COMMENT
+  COMMENT_DELETED
   ACKNOWLEDGED
 }
 
 model User {
-  id             String         @id @default(cuid())
+  id             String   @id @default(cuid())
   name           String
-  email          String         @unique
+  email          String   @unique
   hashedPassword String
-  role           Role           @default(STAFF)
-  isActive       Boolean        @default(true)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  role           Role     @default(STAFF)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  createdTickets  Ticket[]          @relation("CreatedTickets")
-  managedTickets  Ticket[]          @relation("ManagedTickets")
-  comments        Comment[]
-  notifications   Notification[]
-  ticketEvents    TicketEvent[]
-  inventoryItems  InventoryItem[]
-  inventoryLogs   InventoryLog[]
+  createdTickets Ticket[]        @relation("CreatedTickets")
+  managedTickets Ticket[]        @relation("ManagedTickets")
+  comments       Comment[]
+  notifications  Notification[]
+  ticketEvents   TicketEvent[]
+  inventoryItems InventoryItem[]
+  inventoryLogs  InventoryLog[]  @relation("LoggedInventory")
+  voidedLogs     InventoryLog[]  @relation("VoidedInventory")
 }
 
 model Ticket {
-  id               String        @id @default(cuid())
-  ticketNumber     Int           @default(autoincrement())
+  id               String    @id @default(cuid())
+  ticketNumber     Int       @default(autoincrement())
   category         Category
-  severity         Severity      @default(MEDIUM)
-  status           Status        @default(OPEN)
+  severity         Severity  @default(MEDIUM)
+  status           Status    @default(OPEN)
   title            String
   description      String
   dateOfOccurrence DateTime?
   deadline         DateTime?
 
-  creatorId        String
-  creator          User          @relation("CreatedTickets", fields: [creatorId], references: [id])
+  creatorId String
+  creator   User   @relation("CreatedTickets", fields: [creatorId], references: [id])
 
-  managerId        String?
-  manager          User?         @relation("ManagedTickets", fields: [managerId], references: [id])
+  managerId String?
+  manager   User?   @relation("ManagedTickets", fields: [managerId], references: [id])
 
-  comments         Comment[]
-  events           TicketEvent[]
+  comments Comment[]
+  events   TicketEvent[]
 
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([creatorId])
   @@index([managerId])
@@ -100,17 +105,21 @@ model Ticket {
 }
 
 model Comment {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   body      String
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  editedAt  DateTime?
+  deletedAt DateTime?
 
-  ticketId  String
-  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
-  authorId  String
-  author    User     @relation(fields: [authorId], references: [id])
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id])
 
   @@index([ticketId])
+  @@index([ticketId, deletedAt])
 }
 
 model TicketEvent {
@@ -120,11 +129,11 @@ model TicketEvent {
   newValue  String?
   createdAt DateTime  @default(now())
 
-  ticketId  String
-  ticket    Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
-  userId    String
-  user      User      @relation(fields: [userId], references: [id])
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
   @@index([ticketId])
 }
@@ -136,8 +145,8 @@ model Notification {
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
 
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([userId, read])
@@ -152,29 +161,29 @@ enum InventoryAction {
 }
 
 model InventoryCategory {
-  id        String          @id @default(cuid())
-  name      String          @unique
-  createdAt DateTime        @default(now())
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
 
-  items     InventoryItem[]
+  items InventoryItem[]
 }
 
 model InventoryItem {
-  id          String            @id @default(cuid())
-  code        String            @unique
-  name        String
-  unit        String
-  isActive    Boolean           @default(true)
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  unit      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  categoryId  String
-  category    InventoryCategory @relation(fields: [categoryId], references: [id])
+  categoryId String
+  category   InventoryCategory @relation(fields: [categoryId], references: [id])
 
   createdById String
-  createdBy   User              @relation(fields: [createdById], references: [id])
+  createdBy   User   @relation(fields: [createdById], references: [id])
 
-  logs        InventoryLog[]
+  logs InventoryLog[]
 
   @@index([categoryId])
 }
@@ -186,13 +195,21 @@ model InventoryLog {
   details   String
   date      DateTime
   createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
 
-  itemId    String
-  item      InventoryItem   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  voidedAt   DateTime?
+  voidReason String?
+
+  itemId String
+  item   InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
   loggedById String
-  loggedBy   User           @relation(fields: [loggedById], references: [id])
+  loggedBy   User   @relation("LoggedInventory", fields: [loggedById], references: [id])
+
+  voidedById String?
+  voidedBy   User?   @relation("VoidedInventory", fields: [voidedById], references: [id])
 
   @@index([itemId])
   @@index([itemId, action])
+  @@index([itemId, voidedAt])
 }

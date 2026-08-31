@@ -1,50 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessInventory } from "@/lib/permissions";
+import {
+  handler,
+  requireSession,
+  parseBody,
+  forbidden,
+  conflict,
+  json,
+} from "@/lib/api";
+import { LIMITS, trimmedString } from "@/lib/validation";
 import { z } from "zod";
 
 const createCategorySchema = z.object({
-  name: z.string().min(1).max(100),
+  name: trimmedString(LIMITS.categoryName, "Category name"),
 });
 
-export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session || !canAccessInventory(session.user.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+export const GET = handler(async () => {
+  const user = await requireSession();
+  if (!canAccessInventory(user.role)) throw forbidden();
 
   const categories = await prisma.inventoryCategory.findMany({
     orderBy: { name: "asc" },
     include: { _count: { select: { items: true } } },
   });
 
-  return NextResponse.json(categories);
-}
+  return json(categories);
+});
 
-export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session || !canAccessInventory(session.user.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+export const POST = handler(async (req: NextRequest) => {
+  const user = await requireSession();
+  if (!canAccessInventory(user.role)) throw forbidden();
 
-  const body = await req.json();
-  const parsed = createCategorySchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten().fieldErrors }, { status: 400 });
-  }
+  const data = await parseBody(req, createCategorySchema);
 
   const existing = await prisma.inventoryCategory.findUnique({
-    where: { name: parsed.data.name },
+    where: { name: data.name },
+    select: { id: true },
   });
-  if (existing) {
-    return NextResponse.json({ error: "Category already exists" }, { status: 409 });
-  }
+  if (existing) throw conflict("A category with that name already exists.");
 
   const category = await prisma.inventoryCategory.create({
-    data: { name: parsed.data.name },
+    data: { name: data.name },
   });
 
-  return NextResponse.json(category, { status: 201 });
-}
+  return NextResponse.json({ ...category, _count: { items: 0 } }, { status: 201 });
+});

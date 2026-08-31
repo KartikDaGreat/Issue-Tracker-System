@@ -1,101 +1,58 @@
-import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { Role } from "@prisma/client";
+import { NextRequest } from "next/server";
+import { canViewReports } from "@/lib/permissions";
+import { handler, requireSession, forbidden, json } from "@/lib/api";
+import {
+  gatherReportData,
+  buildReportPdf,
+  defaultReportRange,
+  reportFileName,
+} from "@/lib/report";
+import { uploadFileToDrive, isDriveConfigured, DriveError } from "@/lib/google-drive";
+import { ApiError } from "@/lib/api";
+import { startOfDayUTC, endOfDayUTC } from "@/lib/format";
 
-async function getAccessToken(): Promise<string> {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
-
-  if (!clientId || !clientSecret || !refreshToken) {
-    throw new Error("Google Drive credentials not configured");
-  }
-
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }),
-  });
-
-  const data = await res.json();
-  if (!data.access_token) {
-    throw new Error("Failed to refresh Google access token");
-  }
-
-  return data.access_token;
-}
-
-export async function POST(req: Request) {
-  const session = await getServerSession(authOptions);
-  if (!session || session.user.role !== Role.ADMIN) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+/**
+ * Archives the inventory report to Google Drive.
+ *
+ * This endpoint used to read the PDF from the request body while the browser
+ * sent no body at all, so it failed with "No PDF data received" every single
+ * time. It now builds the document server-side from the same code path as the
+ * download endpoint, which also means the archived file is guaranteed to
+ * reflect real database state rather than whatever bytes a client posted.
+ */
+export const POST = handler(async (req: NextRequest) => {
+  const user = await requireSession();
+  if (!canViewReports(user.role)) throw forbidden();
 
   const folderId = process.env.GOOGLE_DRIVE_REPORTS_FOLDER_ID;
   if (!folderId) {
-    return NextResponse.json({ error: "Google Drive reports folder not configured" }, { status: 500 });
+    throw new ApiError(
+      503,
+      "The Google Drive reports folder is not configured on the server."
+    );
+  }
+  if (!isDriveConfigured()) {
+    throw new ApiError(503, "Google Drive credentials are not configured.");
   }
 
-  const pdfBuffer = await req.arrayBuffer();
-  if (!pdfBuffer.byteLength) {
-    return NextResponse.json({ error: "No PDF data received" }, { status: 400 });
-  }
+  const params = req.nextUrl.searchParams;
+  const fallback = defaultReportRange();
+  const from = params.get("from") ? startOfDayUTC(params.get("from")!) : fallback.from;
+  const to = params.get("to") ? endOfDayUTC(params.get("to")!) : fallback.to;
 
-  const dateStr = new Date().toISOString().split("T")[0];
-  const fileName = `inventory-report-${dateStr}.pdf`;
+  const data = await gatherReportData({ from, to });
+  const pdf = buildReportPdf(data);
 
-  let accessToken: string;
   try {
-    accessToken = await getAccessToken();
-  } catch {
-    return NextResponse.json({ error: "Google Drive credentials not configured. Check server environment variables." }, { status: 500 });
+    const file = await uploadFileToDrive(
+      new Uint8Array(pdf),
+      reportFileName(),
+      "application/pdf",
+      folderId
+    );
+    return json({ name: file.name, link: file.webViewLink });
+  } catch (err) {
+    if (err instanceof DriveError) throw new ApiError(err.status, err.message);
+    throw err;
   }
-
-  const metadata = {
-    name: fileName,
-    parents: [folderId],
-    mimeType: "application/pdf",
-  };
-
-  const boundary = "report_boundary_" + Date.now();
-  const metaJson = JSON.stringify(metadata);
-
-  const encoder = new TextEncoder();
-  const pdfBytes = new Uint8Array(pdfBuffer);
-
-  const prefix = encoder.encode(
-    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metaJson}\r\n--${boundary}\r\nContent-Type: application/pdf\r\n\r\n`
-  );
-  const suffix = encoder.encode(`\r\n--${boundary}--`);
-
-  const body = new Uint8Array(prefix.length + pdfBytes.length + suffix.length);
-  body.set(prefix, 0);
-  body.set(pdfBytes, prefix.length);
-  body.set(suffix, prefix.length + pdfBytes.length);
-
-  const uploadRes = await fetch(
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": `multipart/related; boundary=${boundary}`,
-      },
-      body,
-    }
-  );
-
-  if (!uploadRes.ok) {
-    const err = await uploadRes.text();
-    return NextResponse.json({ error: `Drive upload failed: ${err}` }, { status: 500 });
-  }
-
-  const file = await uploadRes.json();
-  return NextResponse.json({ name: file.name, link: file.webViewLink });
-}
+});

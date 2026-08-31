@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
@@ -15,21 +15,29 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
+import { apiJson, errorMessage, RequestError } from "@/lib/fetcher";
+import { humanizeEnum } from "@/lib/format";
+import { LIMITS, ROLES } from "@/lib/validation";
+
+const MIN_PASSWORD_LENGTH = 8;
 
 export default function NewUserPage() {
   const router = useRouter();
   const { data: session } = useSession();
   const [loading, setLoading] = useState(false);
   const [role, setRole] = useState("STAFF");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  if (session && session.user.role !== "ADMIN") {
-    router.push("/dashboard");
-    return null;
-  }
+  // Redirecting during render is a React violation; do it as an effect.
+  // The proxy already blocks non-admins, so this is only a fallback.
+  useEffect(() => {
+    if (session && session.user.role !== "ADMIN") router.push("/dashboard");
+  }, [session, router]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
+    setFieldErrors({});
 
     const form = new FormData(e.currentTarget);
     const body = {
@@ -39,20 +47,14 @@ export default function NewUserPage() {
       role,
     };
 
-    const res = await fetch("/api/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (res.ok) {
+    try {
+      await apiJson("/api/users", "POST", body);
       toast.success("User created successfully");
       router.push("/admin");
-    } else {
-      const err = await res.json();
-      toast.error(
-        typeof err.error === "string" ? err.error : "Failed to create user"
-      );
+      router.refresh();
+    } catch (err) {
+      if (err instanceof RequestError && err.details) setFieldErrors(err.details);
+      toast.error(errorMessage(err));
       setLoading(false);
     }
   }
@@ -68,17 +70,19 @@ export default function NewUserPage() {
         <p className="mt-1 text-sm text-muted-foreground">Add a new user to the system.</p>
       </div>
 
-      <Card className="border-0 shadow-sm ring-1 ring-black/5">
+      <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
         <CardContent className="p-6">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
               <Label htmlFor="name" className="text-sm font-medium">Full Name</Label>
-              <Input id="name" name="name" required placeholder="John Doe" className="h-10" />
+              <Input id="name" name="name" required maxLength={LIMITS.name} placeholder="Vaneetha V" className="h-10" />
+              {fieldErrors.name && <p className="text-xs text-red-600 dark:text-red-400">{fieldErrors.name}</p>}
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="email" className="text-sm font-medium">Email</Label>
-              <Input id="email" name="email" type="email" required placeholder="john@school.com" className="h-10" />
+              <Input id="email" name="email" type="email" required maxLength={LIMITS.email} placeholder="name@school.com" className="h-10" />
+              {fieldErrors.email && <p className="text-xs text-red-600 dark:text-red-400">{fieldErrors.email}</p>}
             </div>
 
             <div className="space-y-2">
@@ -88,8 +92,8 @@ export default function NewUserPage() {
                 name="password"
                 type="password"
                 required
-                minLength={6}
-                placeholder="Minimum 6 characters"
+                minLength={MIN_PASSWORD_LENGTH}
+                placeholder={`Minimum ${MIN_PASSWORD_LENGTH} characters`}
                 className="h-10"
               />
             </div>
@@ -101,12 +105,11 @@ export default function NewUserPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ADMIN">Admin</SelectItem>
-                  <SelectItem value="PRINCIPAL">Principal</SelectItem>
-                  <SelectItem value="ACADEMIC_HEAD">Academic Head</SelectItem>
-                  <SelectItem value="FACILITIES_MANAGER">Facilities Manager</SelectItem>
-                  <SelectItem value="OFFICE_MANAGER">Office Manager</SelectItem>
-                  <SelectItem value="STAFF">Staff</SelectItem>
+                  {ROLES.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {humanizeEnum(r)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

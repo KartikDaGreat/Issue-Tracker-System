@@ -1,9 +1,10 @@
 import { getServerSession } from "next-auth";
+import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canAccessInventory } from "@/lib/permissions";
+import { canAccessInventory, canViewReports } from "@/lib/permissions";
+import { getMovementByItem, EMPTY_MOVEMENT, stockStatus } from "@/lib/inventory";
 import { Role } from "@prisma/client";
-import { redirect } from "next/navigation";
 import InventoryClient from "./InventoryClient";
 
 export default async function InventoryPage() {
@@ -27,37 +28,37 @@ export default async function InventoryPage() {
         isActive: true,
         updatedAt: true,
         category: { select: { id: true, name: true } },
-        logs: { select: { action: true, quantity: true } },
       },
       orderBy: { name: "asc" },
     }),
   ]);
 
+  // One grouped aggregate instead of loading every log row for every item.
+  const movement = await getMovementByItem(items.map((i) => i.id));
+
   const serializedItems = items.map((item) => {
-    let stock = 0;
-    for (const log of item.logs) {
-      if (log.action === "PURCHASED") stock += log.quantity;
-      else stock -= log.quantity;
-    }
-    const { logs: _, ...rest } = item;
+    const m = movement.get(item.id) ?? EMPTY_MOVEMENT;
     return {
-      ...rest,
-      updatedAt: rest.updatedAt.toISOString(),
-      quantityAvailable: stock,
+      ...item,
+      updatedAt: item.updatedAt.toISOString(),
+      quantityAvailable: m.stock,
+      totalPurchased: m.purchased,
+      totalUsed: m.used,
+      totalBroken: m.broken,
+      stockStatus: stockStatus(m.stock),
     };
   });
-
-  const serializedCategories = categories.map((c) => ({
-    id: c.id,
-    name: c.name,
-    _count: c._count,
-  }));
 
   return (
     <InventoryClient
       items={serializedItems}
-      categories={serializedCategories}
+      categories={categories.map((c) => ({
+        id: c.id,
+        name: c.name,
+        _count: c._count,
+      }))}
       role={session.user.role}
+      canDownloadReport={canViewReports(session.user.role as Role)}
     />
   );
 }

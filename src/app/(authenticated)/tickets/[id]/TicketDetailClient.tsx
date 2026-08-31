@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -16,7 +18,19 @@ import { Separator } from "@/components/ui/separator";
 import TicketStatusBadge from "@/components/tickets/TicketStatusBadge";
 import SeverityBadge from "@/components/tickets/SeverityBadge";
 import TicketTimeline from "@/components/tickets/TicketTimeline";
-import CommentSection from "@/components/tickets/CommentSection";
+import CommentSection, {
+  type CommentItem,
+} from "@/components/tickets/CommentSection";
+import InitialsAvatar from "@/components/common/Avatar";
+import ConfirmDialog from "@/components/common/ConfirmDialog";
+import { apiFetch, apiJson, errorMessage } from "@/lib/fetcher";
+import {
+  formatDate,
+  humanizeEnum,
+  isOverdue,
+  toDateInputValue,
+} from "@/lib/format";
+import { CATEGORIES, LIMITS, SEVERITIES } from "@/lib/validation";
 
 interface TicketDetail {
   id: string;
@@ -40,12 +54,7 @@ interface TicketDetail {
     createdAt: string;
     user: { id: string; name: string };
   }[];
-  comments: {
-    id: string;
-    body: string;
-    createdAt: string;
-    author: { id: string; name: string };
-  }[];
+  comments: CommentItem[];
 }
 
 interface UserOption {
@@ -61,121 +70,283 @@ interface Props {
   userId: string;
 }
 
-export default function TicketDetailClient({ ticket: initialTicket, users, userRole, userId }: Props) {
+const STATUS_OPTIONS = ["OPEN", "IN_PROGRESS", "PENDING", "CLOSED"] as const;
+
+export default function TicketDetailClient({
+  ticket: initialTicket,
+  users,
+  userRole,
+  userId,
+}: Props) {
   const router = useRouter();
   const [ticket, setTicket] = useState(initialTicket);
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const [draft, setDraft] = useState({
+    title: initialTicket.title,
+    description: initialTicket.description,
+    category: initialTicket.category,
+    dateOfOccurrence: toDateInputValue(initialTicket.dateOfOccurrence),
+  });
+
+  const isAdmin = userRole === "ADMIN";
+  const isAcknowledged = ticket.status === "ACKNOWLEDGED";
+
+  // Mirrors the server: reaching this page means you have access to the
+  // ticket, and access carries the right to act on it. Acknowledgement is the
+  // only narrowing rule, and it locks the ticket for everyone.
+  const canModify = !isAcknowledged;
 
   async function refreshTicket() {
-    const res = await fetch(`/api/tickets/${ticket.id}`);
-    if (res.ok) setTicket(await res.json());
+    try {
+      const fresh = await apiFetch<TicketDetail>(`/api/tickets/${ticket.id}`);
+      setTicket(fresh);
+      setDraft({
+        title: fresh.title,
+        description: fresh.description,
+        category: fresh.category,
+        dateOfOccurrence: toDateInputValue(fresh.dateOfOccurrence),
+      });
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
   }
 
-  async function updateStatus(status: string) {
+  async function patch(body: Record<string, unknown>, successMessage: string) {
     if (saving) return;
     setSaving(true);
-    const res = await fetch(`/api/tickets/${ticket.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    if (res.ok) {
-      toast.success("Status updated");
+    try {
+      await apiJson(`/api/tickets/${ticket.id}`, "PATCH", body);
+      toast.success(successMessage);
       await refreshTicket();
-    } else {
-      toast.error("Failed to update status");
+      router.refresh();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   }
 
-  async function updateSeverity(severity: string) {
-    if (saving) return;
-    setSaving(true);
-    const res = await fetch(`/api/tickets/${ticket.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ severity }),
-    });
-    if (res.ok) {
-      toast.success("Severity updated");
-      await refreshTicket();
-    } else {
-      toast.error("Failed to update severity");
+  async function saveEdits() {
+    const trimmedTitle = draft.title.trim();
+    if (!trimmedTitle) {
+      toast.error("Title cannot be empty.");
+      return;
     }
-    setSaving(false);
+    if (!draft.description.trim()) {
+      toast.error("Description cannot be empty.");
+      return;
+    }
+
+    await patch(
+      {
+        title: trimmedTitle,
+        description: draft.description.trim(),
+        category: draft.category,
+        dateOfOccurrence: draft.dateOfOccurrence || null,
+      },
+      "Ticket updated"
+    );
+    setEditing(false);
   }
 
   async function reassign(managerId: string) {
     if (saving) return;
     setSaving(true);
-    const res = await fetch(`/api/tickets/${ticket.id}/reassign`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ managerId }),
-    });
-    if (res.ok) {
+    try {
+      await apiJson(`/api/tickets/${ticket.id}/reassign`, "PATCH", {
+        managerId,
+      });
       toast.success("Ticket reassigned");
       await refreshTicket();
-    } else {
-      toast.error("Failed to reassign ticket");
+      router.refresh();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   }
 
-  const isAdmin = userRole === "ADMIN";
-  const isAcknowledged = ticket.status === "ACKNOWLEDGED";
+  async function deleteTicket() {
+    try {
+      await apiJson(`/api/tickets/${ticket.id}`, "DELETE");
+      toast.success(`Ticket #${ticket.ticketNumber} deleted`);
+      router.push("/dashboard");
+      router.refresh();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
 
-  const canReassign =
-    !isAcknowledged && (
-    userRole === "ADMIN" ||
-    userRole === "PRINCIPAL" ||
-    userId === ticket.manager?.id);
-
-  const selectedReassignUser = users.find((u) => u.id === ticket.manager?.id);
+  const overdue =
+    isOverdue(ticket.deadline) &&
+    ticket.status !== "CLOSED" &&
+    !isAcknowledged;
 
   return (
     <div className="space-y-6">
       <div>
-        <Button variant="ghost" size="sm" onClick={() => router.push("/dashboard")} className="mb-3 gap-1 text-muted-foreground">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => router.push("/dashboard")}
+          className="mb-3 gap-1 text-muted-foreground"
+        >
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
           Dashboard
         </Button>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">
-            <span className="text-primary">#{ticket.ticketNumber}</span> {ticket.title}
-          </h1>
-          <TicketStatusBadge status={ticket.status} />
-          <SeverityBadge severity={ticket.severity} />
-        </div>
+
+        {editing ? (
+          <Input
+            value={draft.title}
+            onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+            maxLength={LIMITS.title}
+            className="h-11 text-xl font-bold"
+            aria-label="Ticket title"
+          />
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight">
+              <span className="text-primary">#{ticket.ticketNumber}</span>{" "}
+              {ticket.title}
+            </h1>
+            <TicketStatusBadge status={ticket.status} />
+            <SeverityBadge severity={ticket.severity} />
+          </div>
+        )}
+
         <p className="mt-1 text-sm text-muted-foreground">
-          Created by {ticket.creator.name} on {new Date(ticket.createdAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+          Created by {ticket.creator.name} on {formatDate(ticket.createdAt)}
         </p>
       </div>
 
       {isAcknowledged && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
           This ticket has been acknowledged and is locked from further changes.
         </div>
       )}
 
+      {overdue && (
+        <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          This ticket passed its deadline of {formatDate(ticket.deadline)}.
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-6">
-          <Card className="border-0 shadow-sm ring-1 ring-black/5">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Description</CardTitle>
+        <div className="space-y-6 lg:col-span-2">
+          <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+            <CardHeader className="flex-row items-center justify-between pb-3">
+              <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                Description
+              </CardTitle>
+              {canModify && !editing && (
+                <button
+                  onClick={() => setEditing(true)}
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  Edit details
+                </button>
+              )}
             </CardHeader>
             <CardContent>
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-700">
-                {ticket.description}
-              </p>
+              {editing ? (
+                <div className="space-y-4">
+                  <Textarea
+                    value={draft.description}
+                    onChange={(e) =>
+                      setDraft({ ...draft, description: e.target.value })
+                    }
+                    rows={6}
+                    maxLength={LIMITS.description}
+                    aria-label="Ticket description"
+                  />
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">
+                        Category
+                      </label>
+                      <Select
+                        value={draft.category}
+                        onValueChange={(v) =>
+                          v && setDraft({ ...draft, category: v })
+                        }
+                      >
+                        <SelectTrigger className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CATEGORIES.map((c) => (
+                            <SelectItem key={c} value={c}>
+                              {humanizeEnum(c)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor="occurred"
+                        className="text-xs font-medium text-muted-foreground"
+                      >
+                        Date of occurrence
+                      </label>
+                      <Input
+                        id="occurred"
+                        type="date"
+                        max={new Date().toISOString().split("T")[0]}
+                        value={draft.dateOfOccurrence}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            dateOfOccurrence: e.target.value,
+                          })
+                        }
+                        className="h-9"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 border-t pt-3">
+                    <Button size="sm" onClick={saveEdits} disabled={saving}>
+                      {saving ? "Saving..." : "Save changes"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={saving}
+                      onClick={() => {
+                        setEditing(false);
+                        setDraft({
+                          title: ticket.title,
+                          description: ticket.description,
+                          category: ticket.category,
+                          dateOfOccurrence: toDateInputValue(
+                            ticket.dateOfOccurrence
+                          ),
+                        });
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
+                  {ticket.description}
+                </p>
+              )}
             </CardContent>
           </Card>
 
           <CommentSection
             ticketId={ticket.id}
             comments={ticket.comments}
-            onCommentAdded={refreshTicket}
+            currentUserId={userId}
+            isAdmin={isAdmin}
+            onChanged={refreshTicket}
             readonly={isAcknowledged && !isAdmin}
           />
 
@@ -183,24 +354,24 @@ export default function TicketDetailClient({ ticket: initialTicket, users, userR
         </div>
 
         <div className="space-y-4">
-          <Card className="border-0 shadow-sm ring-1 ring-black/5">
+          <Card className="border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Details</CardTitle>
+              <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                Details
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Category</span>
-                <span className="rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
-                  {ticket.category.replace(/_/g, " ")}
+                <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium">
+                  {humanizeEnum(ticket.category)}
                 </span>
               </div>
               <Separator />
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Created by</span>
                 <div className="flex items-center gap-2">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
-                    {ticket.creator.name.split(" ").map((n) => n[0]).join("")}
-                  </span>
+                  <InitialsAvatar name={ticket.creator.name} className="h-5 w-5 text-[10px]" />
                   <span className="font-medium">{ticket.creator.name}</span>
                 </div>
               </div>
@@ -209,26 +380,28 @@ export default function TicketDetailClient({ ticket: initialTicket, users, userR
                 <span className="text-muted-foreground">Assigned to</span>
                 {ticket.manager ? (
                   <div className="flex items-center gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green-100 text-[10px] font-semibold text-green-700">
-                      {ticket.manager.name.split(" ").map((n) => n[0]).join("")}
-                    </span>
+                    <InitialsAvatar
+                      name={ticket.manager.name}
+                      tone="success"
+                      className="h-5 w-5 text-[10px]"
+                    />
                     <span className="font-medium">{ticket.manager.name}</span>
                   </div>
                 ) : (
-                  <span className="text-muted-foreground italic">Unassigned</span>
+                  <span className="italic text-muted-foreground">Unassigned</span>
                 )}
               </div>
               <Separator />
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Created</span>
-                <span>{new Date(ticket.createdAt).toLocaleDateString()}</span>
+                <span>{formatDate(ticket.createdAt)}</span>
               </div>
               {ticket.dateOfOccurrence && (
                 <>
                   <Separator />
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Occurred</span>
-                    <span>{new Date(ticket.dateOfOccurrence).toLocaleDateString()}</span>
+                    <span>{formatDate(ticket.dateOfOccurrence)}</span>
                   </div>
                 </>
               )}
@@ -237,8 +410,12 @@ export default function TicketDetailClient({ ticket: initialTicket, users, userR
                   <Separator />
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Deadline</span>
-                    <span className={new Date(ticket.deadline) < new Date() ? "text-red-600 font-medium" : ""}>
-                      {new Date(ticket.deadline).toLocaleDateString()}
+                    <span
+                      className={
+                        overdue ? "font-medium text-red-600 dark:text-red-400" : ""
+                      }
+                    >
+                      {formatDate(ticket.deadline)}
                     </span>
                   </div>
                 </>
@@ -246,109 +423,147 @@ export default function TicketDetailClient({ ticket: initialTicket, users, userR
             </CardContent>
           </Card>
 
-          {!(isAcknowledged && !isAdmin) && (
-          <Card className="relative border-0 shadow-sm ring-1 ring-black/5">
-            {saving && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/60 backdrop-blur-[1px]">
-                <svg className="h-5 w-5 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-              </div>
-            )}
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Actions</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-gray-500">Status</label>
-                <Select value={ticket.status} onValueChange={(v) => v && updateStatus(v)}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="OPEN">Open</SelectItem>
-                    <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
-                    <SelectItem value="PENDING">Pending</SelectItem>
-                    <SelectItem value="CLOSED">Closed</SelectItem>
-                    {isAdmin && <SelectItem value="ACKNOWLEDGED">Acknowledged</SelectItem>}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-gray-500">Severity</label>
-                <Select value={ticket.severity} onValueChange={(v) => v && updateSeverity(v)}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="LOW">Low</SelectItem>
-                    <SelectItem value="MEDIUM">Medium</SelectItem>
-                    <SelectItem value="HIGH">High</SelectItem>
-                    <SelectItem value="CRITICAL">Critical</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {isAdmin && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-gray-500">Deadline</label>
-                  <input
-                    type="date"
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                    value={ticket.deadline ? new Date(ticket.deadline).toISOString().split("T")[0] : ""}
-                    onChange={async (e) => {
-                      if (saving) return;
-                      setSaving(true);
-                      const res = await fetch(`/api/tickets/${ticket.id}`, {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ deadline: e.target.value || null }),
-                      });
-                      if (res.ok) {
-                        toast.success("Deadline updated");
-                        await refreshTicket();
-                      } else {
-                        toast.error("Failed to update deadline");
-                      }
-                      setSaving(false);
-                    }}
-                  />
+          {canModify && (
+            <Card className="relative border-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+              {saving && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/60 backdrop-blur-[1px]">
+                  <svg className="h-5 w-5 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                 </div>
               )}
-
-              {canReassign && (
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                  Actions
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-gray-500">Reassign</label>
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Status
+                  </label>
                   <Select
-                    value={ticket.manager?.id || ""}
-                    onValueChange={(v) => v && reassign(v)}
+                    value={ticket.status}
+                    onValueChange={(v) =>
+                      v && v !== ticket.status && patch({ status: v }, "Status updated")
+                    }
                   >
                     <SelectTrigger className="h-9">
-                      {selectedReassignUser ? (
-                        <span className="flex items-center gap-2">
-                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
-                            {selectedReassignUser.name.split(" ").map((n) => n[0]).join("")}
-                          </span>
-                          {selectedReassignUser.name}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">Select user</span>
-                      )}
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {users.map((u) => (
-                        <SelectItem key={u.id} value={u.id}>
-                          {u.name}
+                      {STATUS_OPTIONS.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {humanizeEnum(s)}
+                        </SelectItem>
+                      ))}
+                      {isAdmin && ticket.status === "CLOSED" && (
+                        <SelectItem value="ACKNOWLEDGED">Acknowledged</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  {isAdmin && ticket.status !== "CLOSED" && (
+                    <p className="text-xs text-muted-foreground">
+                      Close the ticket first to acknowledge it.
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Severity
+                  </label>
+                  <Select
+                    value={ticket.severity}
+                    onValueChange={(v) =>
+                      v &&
+                      v !== ticket.severity &&
+                      patch({ severity: v }, "Severity updated")
+                    }
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SEVERITIES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {humanizeEnum(s)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="deadline"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    Deadline
+                  </label>
+                  <Input
+                    id="deadline"
+                    type="date"
+                    className="h-9"
+                    value={toDateInputValue(ticket.deadline)}
+                    onChange={(e) =>
+                      patch(
+                        { deadline: e.target.value || null },
+                        "Deadline updated"
+                      )
+                    }
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Assigned to
+                  </label>
+                  <Select
+                    value={ticket.manager?.id ?? ""}
+                    onValueChange={(v) =>
+                      v && v !== ticket.manager?.id && reassign(v)
+                    }
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Unassigned" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {users.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.name} · {humanizeEnum(u.role)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {isAdmin && (
+            // A quiet footer action rather than a third card: deletion is rare,
+            // and a red-ringed panel on every ticket drew the eye away from the
+            // controls people actually use.
+            <div className="px-1 pt-1">
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="text-xs font-medium text-muted-foreground transition-colors hover:text-red-600 hover:underline dark:hover:text-red-400"
+              >
+                Delete this ticket
+              </button>
+            </div>
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={`Delete ticket #${ticket.ticketNumber}?`}
+        description="This cannot be undone. All comments and activity history for this ticket will be removed."
+        confirmLabel="Delete permanently"
+        destructive
+        onConfirm={deleteTicket}
+      />
     </div>
   );
 }

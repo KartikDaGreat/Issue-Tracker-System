@@ -1,139 +1,175 @@
-import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { Role } from "@prisma/client";
+import { NextRequest } from "next/server";
+import {
+  handler,
+  requireRole,
+  badRequest,
+  ApiError,
+  json,
+} from "@/lib/api";
 import {
   getAccessToken,
-  uploadFileToDrive,
+  getOrCreateSubfolder,
   listFilesInFolder,
-  createDriveFolder,
+  uploadFileToDrive,
+  isDriveConfigured,
+  DriveError,
 } from "@/lib/google-drive";
 
-const PERF_FOLDER_ID = process.env.GOOGLE_DRIVE_PERFORMANCE_FOLDER_ID;
+/**
+ * Student performance workbooks, stored in Drive under a per-academic-year
+ * folder.
+ */
 
-function getAcademicYear(): string {
-  const now = new Date();
-  // Academic year: June to May. If month >= June, it's currentYear-nextYear.
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+
+const SPREADSHEET_MIME_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "text/csv",
+  "application/csv",
+]);
+
+const SPREADSHEET_EXTENSIONS = [".xlsx", ".xls", ".csv"];
+
+function hasSpreadsheetExtension(name: string): boolean {
+  const lower = name.toLowerCase();
+  return SPREADSHEET_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+/** Academic year runs June to May: 2026-08 falls in "2026-2027". */
+function getAcademicYear(now = new Date()): string {
   const year = now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1;
   return `${year}-${year + 1}`;
 }
 
-async function getOrCreateYearFolder(
-  accessToken: string,
-  parentId: string
-): Promise<string> {
-  const yearName = getAcademicYear();
-  const files = await listFilesInFolder(accessToken, parentId);
-  const existing = files.find(
-    (f) =>
-      f.name === yearName &&
-      f.mimeType === "application/vnd.google-apps.folder"
-  );
-  if (existing) return existing.id;
-
-  const folder = await createDriveFolder(accessToken, yearName, parentId);
-  return folder.id;
+/**
+ * Strips path separators and control characters from a user-supplied label
+ * before it becomes a Drive filename.
+ */
+function sanitiseLabel(label: string): string {
+  const cleaned = label
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/[\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 100);
+  return cleaned || "performance";
 }
 
-// GET — list saved files for current academic year
-export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session || session.user.role !== Role.ADMIN) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  if (!PERF_FOLDER_ID) {
-    return NextResponse.json(
-      { error: "Performance folder not configured" },
-      { status: 500 }
+function requireFolder(): string {
+  const folderId = process.env.GOOGLE_DRIVE_PERFORMANCE_FOLDER_ID;
+  if (!folderId) {
+    throw new ApiError(
+      503,
+      "The Google Drive performance folder is not configured on the server."
     );
   }
+  if (!isDriveConfigured()) {
+    throw new ApiError(503, "Google Drive credentials are not configured.");
+  }
+  return folderId;
+}
 
+async function withDriveErrors<T>(fn: () => Promise<T>): Promise<T> {
   try {
-    const accessToken = await getAccessToken();
-    const yearFolderId = await getOrCreateYearFolder(
-      accessToken,
-      PERF_FOLDER_ID
-    );
-    const files = await listFilesInFolder(accessToken, yearFolderId);
+    return await fn();
+  } catch (err) {
+    if (err instanceof DriveError) throw new ApiError(err.status, err.message);
+    throw err;
+  }
+}
 
-    // Only return Excel files
-    const excelFiles = files.filter(
+export const GET = handler(async (req: NextRequest) => {
+  await requireRole("ADMIN");
+  const rootFolderId = requireFolder();
+
+  const year = req.nextUrl.searchParams.get("year") ?? getAcademicYear();
+
+  return withDriveErrors(async () => {
+    await getAccessToken();
+    const yearFolderId = await getOrCreateSubfolder(rootFolderId, year);
+    const files = await listFilesInFolder(yearFolderId);
+
+    const spreadsheets = files.filter(
       (f) =>
-        f.mimeType ===
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-        f.mimeType === "application/vnd.ms-excel" ||
-        f.name.endsWith(".xlsx") ||
-        f.name.endsWith(".xls") ||
-        f.name.endsWith(".csv")
+        SPREADSHEET_MIME_TYPES.has(f.mimeType) || hasSpreadsheetExtension(f.name)
     );
 
-    return NextResponse.json({
-      academicYear: getAcademicYear(),
-      files: excelFiles.map((f) => ({
+    return json({
+      academicYear: year,
+      files: spreadsheets.map((f) => ({
         id: f.id,
         name: f.name,
         createdTime: f.createdTime,
       })),
     });
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to list files" },
-      { status: 500 }
-    );
-  }
-}
+  });
+});
 
-// POST — upload a new file with a custom name
-export async function POST(req: Request) {
-  const session = await getServerSession(authOptions);
-  if (!session || session.user.role !== Role.ADMIN) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+export const POST = handler(async (req: NextRequest) => {
+  const user = await requireRole("ADMIN");
+  const rootFolderId = requireFolder();
 
-  if (!PERF_FOLDER_ID) {
-    return NextResponse.json(
-      { error: "Performance folder not configured" },
-      { status: 500 }
-    );
-  }
-
+  let formData: FormData;
   try {
-    const formData = await req.formData();
-    const file = formData.get("file") as File | null;
-    const label = formData.get("label") as string | null;
+    formData = await req.formData();
+  } catch {
+    throw badRequest("The upload could not be read.");
+  }
 
-    if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
-    }
+  const file = formData.get("file");
+  if (!(file instanceof File)) throw badRequest("Choose a file to upload.");
 
-    const fileName = label
-      ? `${label}.xlsx`
-      : file.name;
-
-    const accessToken = await getAccessToken();
-    const yearFolderId = await getOrCreateYearFolder(
-      accessToken,
-      PERF_FOLDER_ID
+  // None of this was checked before: any file of any size was accepted and
+  // relabelled ".xlsx".
+  if (file.size === 0) throw badRequest("That file is empty.");
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw badRequest(
+      `That file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The limit is ${
+        MAX_UPLOAD_BYTES / 1024 / 1024
+      } MB.`
     );
+  }
 
-    const bytes = new Uint8Array(await file.arrayBuffer());
+  if (
+    !SPREADSHEET_MIME_TYPES.has(file.type) &&
+    !hasSpreadsheetExtension(file.name)
+  ) {
+    throw badRequest("Upload an Excel (.xlsx, .xls) or CSV file.");
+  }
+
+  const rawLabel = formData.get("label");
+  const extension = file.name.toLowerCase().endsWith(".csv") ? ".csv" : ".xlsx";
+  const fileName =
+    typeof rawLabel === "string" && rawLabel.trim()
+      ? `${sanitiseLabel(rawLabel)}${extension}`
+      : sanitiseLabel(file.name.replace(/\.[^.]+$/, "")) + extension;
+
+  const mimeType =
+    extension === ".csv"
+      ? "text/csv"
+      : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+
+  return withDriveErrors(async () => {
+    const yearFolderId = await getOrCreateSubfolder(
+      rootFolderId,
+      getAcademicYear()
+    );
     const uploaded = await uploadFileToDrive(
-      accessToken,
       bytes,
       fileName,
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      mimeType,
       yearFolderId
     );
 
-    return NextResponse.json({
-      id: uploaded.id,
-      name: uploaded.name,
-    });
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Upload failed" },
-      { status: 500 }
+    // Nothing is stored in Postgres for these files, so leave a trace of who
+    // uploaded what.
+    console.info(
+      `[performance] ${user.email} uploaded "${fileName}" (${file.size} bytes)`
     );
-  }
-}
+
+    return json({ id: uploaded.id, name: uploaded.name });
+  });
+});
